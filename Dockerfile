@@ -4,10 +4,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
+COPY app.py collector.py db.py utils.py ./
 RUN uv pip install --system .
 
-COPY . .
+COPY static ./static
+COPY templates ./templates
 
 ENV DATA_DIR=/data
 RUN mkdir -p /data
