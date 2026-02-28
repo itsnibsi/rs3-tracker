@@ -45,6 +45,38 @@ RS3_ORDER = [
     "Necromancy",
 ]
 
+SKILL_COLORS = {
+    "Attack": "#b04d3f",
+    "Constitution": "#a43f52",
+    "Mining": "#7a6f63",
+    "Strength": "#b85d3d",
+    "Agility": "#5c8b6d",
+    "Smithing": "#7c7063",
+    "Defence": "#7f8b97",
+    "Herblore": "#4f7f4f",
+    "Fishing": "#4f758f",
+    "Ranged": "#6b7f52",
+    "Thieving": "#6c5a48",
+    "Cooking": "#a36a3a",
+    "Prayer": "#b9ae8d",
+    "Crafting": "#9f7b60",
+    "Firemaking": "#b85a32",
+    "Magic": "#5e6fb0",
+    "Fletching": "#7b6c54",
+    "Woodcutting": "#5f7a4f",
+    "Runecrafting": "#6e5d9b",
+    "Slayer": "#8b4a4a",
+    "Farming": "#64834c",
+    "Construction": "#8a6b4f",
+    "Hunter": "#7a6f54",
+    "Summoning": "#8c4f7f",
+    "Dungeoneering": "#5e5f67",
+    "Divination": "#4e7f89",
+    "Invention": "#88724f",
+    "Archaeology": "#927154",
+    "Necromancy": "#6f5b8f",
+}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -76,6 +108,17 @@ def format_total_xp(value):
 
 def parse_snapshot_ts(ts):
     return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+def parse_activity_ts(ts):
+    if not ts:
+        return None
+    for fmt in ("%d-%b-%Y %H:%M", "%d-%b-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
 
 
 def normalize_bucket(timeframe):
@@ -401,10 +444,23 @@ def get_dashboard_data():
     with get_conn() as conn:
         cur = conn.cursor()
 
-        cur.execute("SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1")
+        cur.execute(
+            """
+            SELECT s.*, p.username
+            FROM snapshots s
+            LEFT JOIN players p ON p.id = s.player_id
+            ORDER BY s.timestamp DESC
+            LIMIT 1
+        """
+        )
         latest = cur.fetchone()
         if not latest:
             return None
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff_today = today_start.strftime("%Y-%m-%d %H:%M:%S")
+        prev_today = get_window_baseline(cur, cutoff_today, latest)
 
         cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime(
             "%Y-%m-%d %H:%M:%S"
@@ -424,9 +480,9 @@ def get_dashboard_data():
         current_skills = cur.fetchall()
 
         prev_skills_map = {}
-        if prev_24h:
+        if prev_today:
             cur.execute(
-                "SELECT skill, xp FROM skills WHERE snapshot_id = ?", (prev_24h["id"],)
+                "SELECT skill, xp FROM skills WHERE snapshot_id = ?", (prev_today["id"],)
             )
             for r in cur.fetchall():
                 prev_skills_map[r["skill"]] = r["xp"]
@@ -455,6 +511,7 @@ def get_dashboard_data():
                     "xp_display": format_skill_xp(s["xp"]),
                     "xp_gain_display": format_skill_xp(gain),
                     "progress": calculate_progress(s["skill"], s["level"], s["xp"]),
+                    "color": SKILL_COLORS.get(s["skill"], "#a0a0a0"),
                 }
             )
 
@@ -468,8 +525,23 @@ def get_dashboard_data():
         )
         closest_levels = sorted(level_candidates, key=lambda s: s["xp_to_next"])[:3]
 
-        cur.execute("SELECT text, date FROM activities ORDER BY id DESC LIMIT 20")
-        activities = cur.fetchall()
+        cur.execute("SELECT text, date FROM activities")
+        activities = []
+        for row in cur.fetchall():
+            parsed = parse_activity_ts(row["date"])
+            activities.append(
+                {
+                    "text": row["text"],
+                    "date": row["date"],
+                    "date_iso": parsed.isoformat().replace("+00:00", "Z") if parsed else None,
+                    "sort_ts": parsed or datetime.min.replace(tzinfo=timezone.utc),
+                }
+            )
+        activities.sort(key=lambda a: a["sort_ts"], reverse=True)
+        activities = [
+            {"text": a["text"], "date": a["date"], "date_iso": a["date_iso"]}
+            for a in activities[:20]
+        ]
 
         cur.execute(
             """
@@ -493,6 +565,7 @@ def get_dashboard_data():
             "xp_7d": xp_7d,
             "xp_24h_display": format_total_xp(xp_24h),
             "xp_7d_display": format_total_xp(xp_7d),
+            "player_name": latest["username"] or "Unknown Player",
             "top_gainers_today": [
                 {"skill": s["skill"], "xp_gain_display": s["xp_gain_display"]}
                 for s in active_skills[:5]

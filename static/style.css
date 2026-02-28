@@ -1,11 +1,12 @@
 :root {
-    --bg-color: #0f172a;
-    --panel-bg: #1e293b;
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --accent: #38bdf8;
-    --success: #22c55e;
-    --border: #334155;
+    --bg-color: #15171a;
+    --panel-bg: #1d2024;
+    --text-main: #e6e8eb;
+    --text-muted: #9aa1ab;
+    --accent: #8da0b6;
+    --success: #75bc7a;
+    --border: #31353c;
+    --surface-2: #121519;
 }
 
 body {
@@ -85,7 +86,7 @@ h2 {
 }
 
 .summary-cell {
-    background: rgba(15, 23, 42, 0.5);
+    background: rgba(18, 21, 25, 0.72);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 10px 12px;
@@ -191,6 +192,18 @@ h2 {
     border: 1px solid var(--border);
 }
 
+.skills-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.skills-gain-indicator {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
 .skills-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -198,8 +211,10 @@ h2 {
 }
 
 .skill-card {
-    background: rgba(15, 23, 42, 0.5);
+    --skill-color: var(--accent);
+    background: rgba(18, 21, 25, 0.78);
     border: 1px solid var(--border);
+    border-left: 3px solid var(--skill-color);
     border-radius: 8px;
     padding: 12px;
     cursor: pointer;
@@ -207,7 +222,7 @@ h2 {
 }
 
 .skill-card:hover {
-    border-color: var(--accent);
+    border-color: var(--skill-color);
     transform: translateY(-2px);
 }
 
@@ -222,7 +237,7 @@ h2 {
 }
 
 .skill-level {
-    color: var(--accent);
+    color: var(--skill-color);
     font-weight: 700;
 }
 
@@ -239,14 +254,14 @@ h2 {
 }
 
 .progress-bg {
-    background: var(--bg-color);
+    background: var(--surface-2);
     height: 6px;
     border-radius: 3px;
     overflow: hidden;
 }
 
 .progress-fill {
-    background: var(--accent);
+    background: var(--skill-color);
     height: 100%;
     border-radius: 3px;
     transition: width 0.5s ease-out;
@@ -259,8 +274,12 @@ h2 {
 }
 
 .activity-item {
-    padding: 12px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 10px;
+    align-items: start;
 }
 
 .activity-item:last-child {
@@ -268,13 +287,14 @@ h2 {
 }
 
 .activity-date {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--text-muted);
-    margin-bottom: 4px;
+    white-space: nowrap;
+    margin-top: 1px;
 }
 
 .activity-text {
-    font-size: 0.875rem;
+    font-size: 0.82rem;
 }
 
 /* Modal */
@@ -296,6 +316,7 @@ h2 {
 }
 
 .modal-content {
+    --modal-accent: var(--accent);
     background: var(--panel-bg);
     padding: 24px;
     border-radius: 12px;
@@ -309,6 +330,12 @@ h2 {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
+}
+
+.skill-gain-summary {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    margin: -2px 0 10px 0;
 }
 
 .close-btn {
@@ -331,7 +358,7 @@ h2 {
 }
 
 .tf-btn {
-    background: var(--bg-color);
+    background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text-main);
     padding: 8px 16px;
@@ -345,5 +372,25 @@ h2 {
 .tf-btn.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: #0f1217;
+}
+
+.modal-content .tf-btn:hover,
+.modal-content .tf-btn.active {
+    background: var(--modal-accent);
+    border-color: var(--modal-accent);
+    color: var(--text-main);
+}
+
+@media (max-width: 760px) {
+    .skills-heading {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .activity-item {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
 }

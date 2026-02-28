@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RS3 Tracker</title>
+    <title>{{ data.player_name if data else 'RS3 Tracker' }} - RS3 Tracker</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/moment"></script>
@@ -19,7 +19,7 @@
     <div class="container">
         <header>
             <div>
-                <h1>RS3 Tracker</h1>
+                <h1>{{ data.player_name if data else 'RS3 Tracker' }}</h1>
                 <div style="color: var(--text-muted)">
                     Last updated: <span id="lastUpdated">{{ data.latest.timestamp if data else 'Never' }}</span>
                 </div>
@@ -85,10 +85,13 @@
         <div class="main-content">
             <div class="left-column">
                 <div class="panel">
-                    <h2>Skills</h2>
+                    <div class="skills-heading">
+                        <h2>Skills</h2>
+                        <span class="skills-gain-indicator">Gains shown: today (UTC)</span>
+                    </div>
                     <div class="skills-grid">
                         {% for s in data.skills %}
-                        <div class="skill-card" data-skill="{{ s.skill }}">
+                        <div class="skill-card" data-skill="{{ s.skill }}" style="--skill-color: {{ s.color }};">
                             <div class="skill-header">
                                 <span class="skill-name">{{ s.skill }}</span>
                                 <span class="skill-level">{{ s.level }}</span>
@@ -96,9 +99,7 @@
                             <div class="skill-details">
                                 <span>{{ s.xp_display }} XP</span>
                                 {% if s.xp_gain > 0 %}
-                                <span class="xp-gain-positive">+{{ s.xp_gain_display }}</span>
-                                {% else %}
-                                <span>0</span>
+                                <span class="xp-gain-positive">Today +{{ s.xp_gain_display }}</span>
                                 {% endif %}
                             </div>
                             <div class="progress-bg">
@@ -121,7 +122,7 @@
                     <ul class="activities-list">
                         {% for a in data.activities %}
                         <li class="activity-item">
-                            <div class="activity-date">{{ a.date }}</div>
+                            <div class="activity-date" {% if a.date_iso %}data-date-iso="{{ a.date_iso }}"{% endif %}>{{ a.date }}</div>
                             <div class="activity-text">{{ a.text }}</div>
                         </li>
                         {% endfor %}
@@ -143,6 +144,7 @@
                 <h2 id="modalSkillTitle">Skill History</h2>
                 <button class="close-btn" id="closeModal">&times;</button>
             </div>
+            <div id="skillGainSummary" class="skill-gain-summary"></div>
             <canvas id="skillChart" height="100"></canvas>
             <div id="skillNoGainsMessage" style="display:none; color: var(--text-muted); margin-top: 12px;">
                 No gains in the selected range yet.
@@ -159,6 +161,21 @@
 
     <script>
         const numberFmt = new Intl.NumberFormat();
+        const cssVars = getComputedStyle(document.documentElement);
+        const chartAccent = cssVars.getPropertyValue('--accent').trim() || '#8da0b6';
+        const chartMuted = cssVars.getPropertyValue('--text-muted').trim() || '#9aa1ab';
+        const chartGrid = cssVars.getPropertyValue('--border').trim() || '#31353c';
+        const hexToRgba = (hex, alpha) => {
+            if (!hex || !hex.startsWith('#')) return `rgba(141, 160, 182, ${alpha})`;
+            const full = hex.length === 4
+                ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
+                : hex;
+            const int = parseInt(full.slice(1), 16);
+            const r = (int >> 16) & 255;
+            const g = (int >> 8) & 255;
+            const b = int & 255;
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        };
         const formatXpNumber = (value) =>
             value == null || Number.isNaN(Number(value)) ? '-' : numberFmt.format(Math.round(Number(value)));
         const previousNonNull = (series, index) => {
@@ -178,6 +195,13 @@
         if (lu && lu.textContent !== 'Never') {
             lu.textContent = new Date(lu.textContent).toLocaleString();
         }
+        document.querySelectorAll('.activity-date[data-date-iso]').forEach((el) => {
+            const iso = el.dataset.dateIso;
+            const dt = new Date(iso);
+            if (!Number.isNaN(dt.valueOf())) {
+                el.textContent = dt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+            }
+        });
 
         // Manual Update Button
         document.getElementById('updateBtn').addEventListener('click', async (e) => {
@@ -194,7 +218,7 @@
                 labels: {{ data.timestamps | tojson }},
             datasets: [{
                 label: 'Total XP', data: {{ data.xp_history | tojson }},
-            borderColor: '#38bdf8', backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            borderColor: chartAccent, backgroundColor: hexToRgba(chartAccent, 0.15),
             borderWidth: 2, fill: true, tension: 0.4, pointRadius: 0
                 }]
             },
@@ -213,21 +237,38 @@
                 }
             },
             scales: {
-                x: { type: 'time', time: { tooltipFormat: 'll HH:mm' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-                y: { ticks: { color: '#94a3b8', callback: val => val.toLocaleString() }, grid: { color: '#334155' } }
+                x: { type: 'time', time: { tooltipFormat: 'll HH:mm' }, ticks: { color: chartMuted }, grid: { color: chartGrid } },
+                y: { ticks: { color: chartMuted, callback: val => val.toLocaleString() }, grid: { color: chartGrid } }
             }
         }
         });
 
         // Skill modal chart
         const modal = document.getElementById('skillModal');
+        const modalContent = modal.querySelector('.modal-content');
         const noGains = document.getElementById('skillNoGainsMessage');
+        const gainSummary = document.getElementById('skillGainSummary');
         let currentSkill = '';
+        let currentSkillColor = chartAccent;
         let skillChartInstance = null;
+        const periodLabel = (period) => {
+            if (period === 'day') return 'past day';
+            if (period === 'week') return 'past week';
+            if (period === 'month') return 'current month';
+            if (period === 'year') return 'past year';
+            return 'selected range';
+        };
+        const calculateRangeGain = (series) => {
+            const values = (series || []).filter(v => v != null).map(Number);
+            if (!values.length) return null;
+            return Math.max(0, values[values.length - 1] - values[0]);
+        };
 
         document.querySelectorAll('.skill-card').forEach(card => {
             card.addEventListener('click', () => {
                 currentSkill = card.dataset.skill;
+                currentSkillColor = getComputedStyle(card).getPropertyValue('--skill-color').trim() || chartAccent;
+                modalContent.style.setProperty('--modal-accent', currentSkillColor);
                 document.getElementById('modalSkillTitle').textContent = `${currentSkill} History`;
                 modal.classList.add('active');
 
@@ -251,6 +292,8 @@
         async function loadSkillData(skill, period) {
             const res = await fetch(`/api/chart/${encodeURIComponent(skill)}/${period}`);
             const chartData = await res.json();
+            const totalGain = calculateRangeGain(chartData.totals);
+            const range = periodLabel(period);
 
             if (skillChartInstance) {
                 skillChartInstance.destroy();
@@ -259,10 +302,12 @@
 
             if (!chartData.has_gains) {
                 noGains.style.display = 'block';
+                gainSummary.textContent = `Gained in ${range}: n/a`;
                 return;
             }
 
             noGains.style.display = 'none';
+            gainSummary.textContent = `Gained in ${range}: ${formatXpNumber(totalGain)} XP`;
             const timeUnit = period === 'day' ? 'hour' : 'day';
             const tooltipFormat = period === 'day' ? 'll HH:mm' : 'll';
             const pointRadius = chartData.labels.length > 180 ? 0 : (chartData.labels.length > 60 ? 1.5 : 3);
@@ -274,8 +319,8 @@
                     datasets: [{
                         label: `${skill} XP`,
                         data: chartData.totals,
-                        borderColor: '#22c55e',
-                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        borderColor: currentSkillColor,
+                        backgroundColor: hexToRgba(currentSkillColor, 0.15),
                         borderWidth: 2,
                         fill: true,
                         tension: 0.3,
@@ -307,10 +352,10 @@
                                     day: 'MMM D'
                                 }
                             },
-                            ticks: { color: '#94a3b8' },
-                            grid: { color: '#334155' }
+                            ticks: { color: chartMuted },
+                            grid: { color: chartGrid }
                         },
-                        y: { ticks: { color: '#94a3b8', callback: val => val.toLocaleString() }, grid: { color: '#334155' } }
+                        y: { ticks: { color: chartMuted, callback: val => val.toLocaleString() }, grid: { color: chartGrid } }
                     }
                 }
             });
