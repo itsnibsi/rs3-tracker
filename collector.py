@@ -80,7 +80,7 @@ def collect_snapshot():
         return
 
     if "error" in data or "skillvalues" not in data:
-        print(f"Invalid response or profile is private.")
+        print("Invalid response or profile is private.")
         return
 
     with get_conn() as conn:
