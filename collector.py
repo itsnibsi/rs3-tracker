@@ -1,3 +1,5 @@
+import time
+
 import requests
 
 from db import get_conn
@@ -99,7 +101,9 @@ def collect_snapshot():
     conn.close()
 
     # Print something useful
-    print(f"Collected snapshot for {USERNAME} at {data['timestamp']}")
+    print(
+        f"Collected snapshot for {USERNAME} at {time.strftime('%Y-%m-%d %H:%M:%S')}, total XP: {data['totalxp']}, total level: {data['totalskill']}"
+    )
 
 
 if __name__ == "__main__":
