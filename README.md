@@ -109,3 +109,28 @@ PRAGMA table_info(snapshots);
 ```
 
 For future schema changes, add a new migration entry in `db.py` and avoid editing old migration steps.
+
+## Automated checks
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+It now validates every push and pull request with:
+
+1. `ruff check .`
+2. `pytest`
+3. `docker build --tag rs3-tracker-ci .`
+
+## Review plan status
+
+Recently completed from `REVIEW.md`:
+
+- Migration framework in `db.py` and schema migration execution
+- Quest field migration (`quests_started`, `quests_complete`, `quests_not_started`)
+- Collector quest-field mapping update
+- Secret Manager deployment wiring in `cloudbuild.yaml`
+
+Next recommended implementation block:
+
+1. Break down `app.py` into `config`, routes, repositories, and services while preserving behavior.
+2. Move collector scheduling out of web app lifespan (Cloud Scheduler or Cloud Run Job).
+3. Add admin POST CSRF protection and lightweight admin rate limiting.
