@@ -79,7 +79,7 @@ def _migration_snapshots_quest_fields(conn: sqlite3.Connection):
 
 def _migration_add_hash_to_activities(conn: sqlite3.Connection):
     if "hash" not in _get_table_columns(conn, "activities"):
-        conn.execute("ALTER TABLE activities ADD COLUMN hash TEXT UNIQUE")
+        conn.execute("ALTER TABLE activities ADD COLUMN hash TEXT")
 
 
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
@@ -149,6 +149,9 @@ def _create_indexes(conn: sqlite3.Connection):
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skills_snapshot_skill ON skills(snapshot_id, skill)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_hash ON activities(hash)"
     )
 
 
