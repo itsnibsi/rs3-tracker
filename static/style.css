@@ -189,6 +189,7 @@ h2 {
     .stats-grid {
         grid-template-columns: 1fr;
     }
+
 }
 
 .panel {

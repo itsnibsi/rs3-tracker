@@ -65,23 +65,26 @@
                 <div class="summary-label active-skills-empty">No gains today</div>
                 {% endif %}
             </div>
-            <div class="stat-card closest-level-card">
-                <div class="stat-title">Closest Level-Ups</div>
-                {% if data.closest_levels %}
-                <div class="nearest-level-list">
-                    {% for s in data.closest_levels %}
-                    <div class="nearest-level-row">
-                        <div>
-                            <div class="nearest-level-skill">{{ loop.index }}. {{ s.skill }}</div>
-                            <div class="summary-label">To level {{ s.target_level }}</div>
-                        </div>
-                        <div class="nearest-level-xp">{{ s.xp_to_next_display }} XP</div>
+            <div class="stat-card">
+                <div class="stat-title">Today Highlights</div>
+                <div class="active-skills-list">
+                    <div class="active-skill-row">
+                        <span>XP Gained Today</span>
+                        <span class="xp-gain-positive">+{{ data.today_highlights.xp_today_display }}</span>
                     </div>
-                    {% endfor %}
+                    <div class="active-skill-row">
+                        <span>Levels Gained</span>
+                        <span>{{ "{:,}".format(data.today_highlights.levels_gained_today) }}</span>
+                    </div>
+                    <div class="active-skill-row">
+                        <span>Quests Finished</span>
+                        <span>{{ "{:,}".format(data.today_highlights.quests_finished_today) }}</span>
+                    </div>
+                    <div class="active-skill-row">
+                        <span>Ranks Climbed</span>
+                        <span>{{ data.today_highlights.ranks_climbed_today_display }}</span>
+                    </div>
                 </div>
-                {% else %}
-                <div class="summary-label active-skills-empty">All tracked skills are maxed</div>
-                {% endif %}
             </div>
         </div>
 
@@ -132,6 +135,24 @@
                 <div class="panel" style="margin-bottom: 24px;">
                     <h2>Total XP (30 Days)</h2>
                     <canvas id="totalXpChart" height="200"></canvas>
+                </div>
+                <div class="panel closest-level-card">
+                    <h2>Closest Level-Ups</h2>
+                    {% if data.closest_levels %}
+                    <div class="nearest-level-list">
+                        {% for s in data.closest_levels %}
+                        <div class="nearest-level-row">
+                            <div>
+                                <div class="nearest-level-skill">{{ loop.index }}. {{ s.skill }}</div>
+                                <div class="summary-label">To level {{ s.target_level }}</div>
+                            </div>
+                            <div class="nearest-level-xp">{{ s.xp_to_next_display }} XP</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="summary-label active-skills-empty">All tracked skills are maxed</div>
+                    {% endif %}
                 </div>
             </div>
         </div>

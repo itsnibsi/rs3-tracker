@@ -610,18 +610,23 @@ def get_dashboard_data():
         current_skills = cur.fetchall()
 
         prev_skills_map = {}
+        prev_levels_map = {}
         if prev_today:
             cur.execute(
-                "SELECT skill, xp FROM skills WHERE snapshot_id = ?",
+                "SELECT skill, xp, level FROM skills WHERE snapshot_id = ?",
                 (prev_today["id"],),
             )
             for r in cur.fetchall():
                 prev_skills_map[r["skill"]] = r["xp"]
+                prev_levels_map[r["skill"]] = r["level"]
 
         skills_data = []
         level_candidates = []
+        levels_gained_today = 0
         for s in current_skills:
             gain = s["xp"] - prev_skills_map.get(s["skill"], s["xp"])
+            prev_level = prev_levels_map.get(s["skill"], s["level"])
+            levels_gained_today += max(0, s["level"] - prev_level)
             remaining_xp = xp_to_next_level(s["skill"], s["level"], s["xp"])
             if remaining_xp > 0:
                 level_candidates.append(
@@ -678,6 +683,12 @@ def get_dashboard_data():
                 }
             )
         activities.sort(key=lambda a: (a["sort_ts"], a["id"]), reverse=True)
+
+        today_quests_finished = sum(
+            1
+            for a in activities
+            if a["type_key"] == "quest" and a["sort_ts"] >= today_start
+        )
         activities = [
             {
                 "id": a["id"],
@@ -706,11 +717,21 @@ def get_dashboard_data():
         latest_dict = dict(latest)
         latest_dict["total_xp_display"] = format_total_xp(latest["total_xp"])
 
+        xp_today = max(0, latest["total_xp"] - prev_today["total_xp"])
+        ranks_climbed_today = max(0, prev_today["overall_rank"] - latest["overall_rank"])
         xp_24h = latest["total_xp"] - prev_24h["total_xp"]
         xp_7d = latest["total_xp"] - prev_7d["total_xp"]
 
         return {
             "latest": latest_dict,
+            "today_highlights": {
+                "xp_today": xp_today,
+                "xp_today_display": format_total_xp(xp_today),
+                "levels_gained_today": levels_gained_today,
+                "quests_finished_today": today_quests_finished,
+                "ranks_climbed_today": ranks_climbed_today,
+                "ranks_climbed_today_display": f"{ranks_climbed_today:,}",
+            },
             "xp_24h": xp_24h,
             "xp_7d": xp_7d,
             "xp_24h_display": format_total_xp(xp_24h),
