@@ -57,13 +57,21 @@ app = FastAPI(lifespan=lifespan, title="RS3 Tracker")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-def scale_xp(value):
+def scale_skill_xp(value):
     return (value or 0) / 10
 
 
-def format_xp(value):
-    scaled = scale_xp(value)
+def scale_total_xp(value):
+    return value or 0
+
+
+def format_skill_xp(value):
+    scaled = scale_skill_xp(value)
     return f"{scaled:,.1f}".rstrip("0").rstrip(".")
+
+
+def format_total_xp(value):
+    return f"{int(scale_total_xp(value)):,}"
 
 
 def parse_snapshot_ts(ts):
@@ -161,13 +169,12 @@ def get_timeframe_window(timeframe, now, earliest_ts=None):
 
     if t == "day":
         end = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start = end.replace(day=1)
+        start = end - timedelta(days=6)
         return start, end, "day"
 
     if t == "week":
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        start = month_start
         end = bucket_start(now, "week")
+        start = end - timedelta(weeks=7)
         return start, end, "week"
 
     if t == "month":
@@ -185,7 +192,7 @@ def get_timeframe_window(timeframe, now, earliest_ts=None):
     return start, end, "day"
 
 
-def aggregate_bucket_gains(rows, bucket, starts, value_key):
+def aggregate_bucket_gains(rows, bucket, starts, value_key, scale_fn=scale_total_xp):
     parsed = [
         (parse_snapshot_ts(row["timestamp"]), row[value_key])
         for row in rows
@@ -217,14 +224,14 @@ def aggregate_bucket_gains(rows, bucket, starts, value_key):
         else:
             gain_raw = max(0, bucket_close - previous_close)
 
-        values.append(scale_xp(gain_raw))
+        values.append(scale_fn(gain_raw))
         if bucket_close is not None:
             previous_close = bucket_close
 
     return values
 
 
-def aggregate_bucket_totals(rows, bucket, starts, value_key):
+def aggregate_bucket_totals(rows, bucket, starts, value_key, scale_fn=scale_total_xp):
     parsed = [
         (parse_snapshot_ts(row["timestamp"]), row[value_key])
         for row in rows
@@ -251,14 +258,14 @@ def aggregate_bucket_totals(rows, bucket, starts, value_key):
             bucket_close = parsed[idx][1]
             idx += 1
 
-        values.append(scale_xp(bucket_close or 0))
+        values.append(scale_fn(bucket_close or 0))
         if bucket_close is not None:
             previous_close = bucket_close
 
     return values
 
 
-def aggregate_last_snapshot_totals(rows, bucket, starts, value_key):
+def aggregate_last_snapshot_totals(rows, bucket, starts, value_key, scale_fn=scale_total_xp):
     parsed = [
         (parse_snapshot_ts(row["timestamp"]), row[value_key])
         for row in rows
@@ -291,7 +298,7 @@ def aggregate_last_snapshot_totals(rows, bucket, starts, value_key):
             continue
 
         seen_data = True
-        values.append(scale_xp(bucket_close if bucket_close is not None else previous_close))
+        values.append(scale_fn(bucket_close if bucket_close is not None else previous_close))
         if bucket_close is not None:
             previous_close = bucket_close
 
@@ -333,7 +340,10 @@ def build_bucket_gains(rows, bucket, value_key):
     for b, closing_xp in ordered:
         gain_raw = 0 if prev_xp is None else max(0, closing_xp - prev_xp)
         points.append(
-            {"timestamp": b.strftime("%Y-%m-%d %H:%M:%S") + "Z", "gain": scale_xp(gain_raw)}
+            {
+                "timestamp": b.strftime("%Y-%m-%d %H:%M:%S") + "Z",
+                "gain": scale_total_xp(gain_raw),
+            }
         )
         prev_xp = closing_xp
     return points
@@ -349,7 +359,10 @@ def build_bucket_totals(rows, bucket, value_key):
 
     ordered = sorted(bucket_closing_xp.items(), key=lambda t: t[0])
     return [
-        {"timestamp": b.strftime("%Y-%m-%d %H:%M:%S") + "Z", "total": scale_xp(closing_xp)}
+        {
+            "timestamp": b.strftime("%Y-%m-%d %H:%M:%S") + "Z",
+            "total": scale_total_xp(closing_xp),
+        }
         for b, closing_xp in ordered
     ]
 
@@ -369,6 +382,17 @@ def get_window_baseline(cur, cutoff, latest):
         (cutoff,),
     )
     return cur.fetchone() or latest
+
+
+def series_has_gain(values):
+    previous = None
+    for value in values:
+        if value is None:
+            continue
+        if previous is not None and value > previous:
+            return True
+        previous = value
+    return False
 
 
 async def background_loop():
@@ -437,8 +461,8 @@ def get_dashboard_data():
                     "level": s["level"],
                     "xp": s["xp"],
                     "xp_gain": gain,
-                    "xp_display": format_xp(s["xp"]),
-                    "xp_gain_display": format_xp(gain),
+                    "xp_display": format_skill_xp(s["xp"]),
+                    "xp_gain_display": format_skill_xp(gain),
                     "progress": calculate_progress(s["skill"], s["level"], s["xp"]),
                 }
             )
@@ -461,7 +485,7 @@ def get_dashboard_data():
         history = cur.fetchall()
 
         latest_dict = dict(latest)
-        latest_dict["total_xp_display"] = format_xp(latest["total_xp"])
+        latest_dict["total_xp_display"] = format_total_xp(latest["total_xp"])
 
         xp_24h = latest["total_xp"] - prev_24h["total_xp"]
         xp_7d = latest["total_xp"] - prev_7d["total_xp"]
@@ -470,13 +494,13 @@ def get_dashboard_data():
             "latest": latest_dict,
             "xp_24h": xp_24h,
             "xp_7d": xp_7d,
-            "xp_24h_display": format_xp(xp_24h),
-            "xp_7d_display": format_xp(xp_7d),
+            "xp_24h_display": format_total_xp(xp_24h),
+            "xp_7d_display": format_total_xp(xp_7d),
             "streak_days": streak,
             "skills": skills_data,
             "activities": [dict(a) for a in activities],
             "timestamps": [r["timestamp"] + "Z" for r in history],
-            "xp_history": [scale_xp(r["total_xp"]) for r in history],
+            "xp_history": [scale_total_xp(r["total_xp"]) for r in history],
         }
 
 
@@ -509,7 +533,7 @@ def api_skill_history(skill_name: str, timeframe: str = "all"):
         )
 
         rows = cur.fetchall()
-        totals = aggregate_bucket_totals(rows, bucket, starts, "xp")
+        totals = aggregate_bucket_totals(rows, bucket, starts, "xp", scale_skill_xp)
         labels = [format_bucket_label(b, bucket) for b in starts]
         return [{"timestamp": ts, "total": v} for ts, v in zip(labels, totals)]
 
@@ -547,7 +571,9 @@ def api_skills_totals(timeframe: str = "day"):
         order_map = {name: i for i, name in enumerate(RS3_ORDER)}
         series = []
         for skill in sorted(per_skill_rows.keys(), key=lambda x: order_map.get(x, 999)):
-            values = aggregate_bucket_totals(per_skill_rows[skill], bucket, starts, "xp")
+            values = aggregate_bucket_totals(
+                per_skill_rows[skill], bucket, starts, "xp", scale_skill_xp
+            )
             series.append({"skill": skill, "totals": values})
 
         return {"labels": labels, "series": series}
@@ -589,12 +615,13 @@ def api_chart(skill_name: str, period: str = "day"):
             )
 
         rows = cur.fetchall()
-        totals = aggregate_last_snapshot_totals(rows, bucket, starts, "xp")
+        scale_fn = scale_total_xp if skill_name.lower() == "total" else scale_skill_xp
+        totals = aggregate_last_snapshot_totals(rows, bucket, starts, "xp", scale_fn)
         labels = [format_bucket_label(b, bucket) for b in starts]
 
         # Keep the full window labels so the x-axis spans the selected period even if
         # only some buckets contain data.
-        has_gains = any(v is not None for v in totals)
+        has_gains = series_has_gain(totals)
 
         return {
             "labels": labels,

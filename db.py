@@ -53,3 +53,9 @@ def init_db():
             hash TEXT UNIQUE
         )
         """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skills_snapshot_skill ON skills(snapshot_id, skill)"
+        )
