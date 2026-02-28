@@ -13,7 +13,6 @@ from collector import collect_snapshot
 from db import get_conn
 from services.charts import (
     advance_bucket,
-    aggregate_bucket_gains,
     aggregate_bucket_totals,
     aggregate_last_snapshot_totals,
     build_bucket_gains,
