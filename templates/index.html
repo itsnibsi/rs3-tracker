@@ -122,6 +122,22 @@
     </div>
 
     <script>
+        const numberFmt = new Intl.NumberFormat();
+        const formatXpNumber = (value) =>
+            value == null || Number.isNaN(Number(value)) ? '-' : numberFmt.format(Math.round(Number(value)));
+        const previousNonNull = (series, index) => {
+            for (let i = index - 1; i >= 0; i--) {
+                if (series[i] != null) return Number(series[i]);
+            }
+            return null;
+        };
+        const formatDelta = (current, previous) => {
+            if (current == null || previous == null) return 'n/a';
+            const delta = Number(current) - Number(previous);
+            const sign = delta > 0 ? '+' : '';
+            return `${sign}${numberFmt.format(Math.round(delta))}`;
+        };
+
         // Format Local Time
         const lu = document.getElementById('lastUpdated');
         if (lu && lu.textContent !== 'Never') {
@@ -148,7 +164,19 @@
                 }]
             },
             options: {
-            responsive: true, plugins: { legend: { display: false } },
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => `Total XP: ${formatXpNumber(ctx.parsed.y)}`,
+                        afterLabel: (ctx) => {
+                            const prev = previousNonNull(ctx.dataset.data, ctx.dataIndex);
+                            return `Delta: ${formatDelta(ctx.parsed.y, prev)}`;
+                        }
+                    }
+                }
+            },
             scales: {
                 x: { type: 'time', time: { tooltipFormat: 'll HH:mm' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
                 y: { ticks: { color: '#94a3b8', callback: val => val.toLocaleString() }, grid: { color: '#334155' } }
@@ -221,7 +249,18 @@
                 },
                 options: {
                     responsive: true,
-                    plugins: { legend: { display: false } },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.dataset.label}: ${formatXpNumber(ctx.parsed.y)}`,
+                                afterLabel: (ctx) => {
+                                    const prev = previousNonNull(ctx.dataset.data, ctx.dataIndex);
+                                    return `Delta: ${formatDelta(ctx.parsed.y, prev)}`;
+                                }
+                            }
+                        }
+                    },
                     scales: {
                         x: {
                             type: 'time',

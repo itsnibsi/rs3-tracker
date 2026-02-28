@@ -384,15 +384,8 @@ def get_window_baseline(cur, cutoff, latest):
     return cur.fetchone() or latest
 
 
-def series_has_gain(values):
-    previous = None
-    for value in values:
-        if value is None:
-            continue
-        if previous is not None and value > previous:
-            return True
-        previous = value
-    return False
+def series_has_data(values):
+    return any(value is not None for value in values)
 
 
 async def background_loop():
@@ -621,7 +614,7 @@ def api_chart(skill_name: str, period: str = "day"):
 
         # Keep the full window labels so the x-axis spans the selected period even if
         # only some buckets contain data.
-        has_gains = series_has_gain(totals)
+        has_gains = series_has_data(totals)
 
         return {
             "labels": labels,
