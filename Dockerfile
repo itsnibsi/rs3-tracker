@@ -1,5 +1,6 @@
 FROM python:3.12-slim
 
+# Install uv
 RUN pip install uv
 
 WORKDIR /app
@@ -9,8 +10,8 @@ RUN uv sync --frozen --no-dev
 
 COPY . .
 
-RUN mkdir -p /data
 ENV DATA_DIR=/data
+RUN mkdir -p /data
 
 EXPOSE 8080
 
