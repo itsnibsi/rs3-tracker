@@ -50,9 +50,14 @@ def init_db():
             snapshot_id INTEGER,
             text TEXT,
             date TEXT,
+            details TEXT,
             hash TEXT UNIQUE
         )
         """)
+        cur = conn.execute("PRAGMA table_info(activities)")
+        activity_columns = {row["name"] for row in cur.fetchall()}
+        if "details" not in activity_columns:
+            conn.execute("ALTER TABLE activities ADD COLUMN details TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)"
         )

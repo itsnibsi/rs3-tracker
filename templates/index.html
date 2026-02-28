@@ -87,29 +87,44 @@
 
         <div class="main-content">
             <div class="left-column">
-                <div class="panel">
-                    <div class="skills-heading">
-                        <h2>Skills</h2>
-                        <span class="skills-gain-indicator">Gains shown: today (UTC)</span>
-                    </div>
-                    <div class="skills-grid">
-                        {% for s in data.skills %}
-                        <div class="skill-card" data-skill="{{ s.skill }}" style="--skill-color: {{ s.color }};">
-                            <div class="skill-header">
-                                <span class="skill-name">{{ s.skill }}</span>
-                                <span class="skill-level">{{ s.level }}</span>
-                            </div>
-                            <div class="skill-details">
-                                <span>{{ s.xp_display }} XP</span>
-                                {% if s.xp_gain > 0 %}
-                                <span class="xp-gain-positive">Today +{{ s.xp_gain_display }}</span>
-                                {% endif %}
-                            </div>
-                            <div class="progress-bg">
-                                <div class="progress-fill" style="width: {{ s.progress * 100 }}%"></div>
-                            </div>
+                <div class="panel tab-panel">
+                    <div class="tab-header">
+                        <div class="tab-buttons">
+                            <button class="tf-btn tab-btn active" data-tab="skills">Skills</button>
+                            <button class="tf-btn tab-btn" data-tab="feed">Activity Feed</button>
                         </div>
-                        {% endfor %}
+                        <span id="tabMetaText" class="skills-gain-indicator">Gains shown: today (UTC)</span>
+                    </div>
+
+                    <div class="tab-content active" data-tab-content="skills">
+                        <div class="skills-grid">
+                            {% for s in data.skills %}
+                            <div class="skill-card" data-skill="{{ s.skill }}" style="--skill-color: {{ s.color }};">
+                                <div class="skill-header">
+                                    <span class="skill-name">{{ s.skill }}</span>
+                                    <span class="skill-level">{{ s.level }}</span>
+                                </div>
+                                <div class="skill-details">
+                                    <span>{{ s.xp_display }} XP</span>
+                                    {% if s.xp_gain > 0 %}
+                                    <span class="xp-gain-positive">Today +{{ s.xp_gain_display }}</span>
+                                    {% endif %}
+                                </div>
+                                <div class="progress-bg">
+                                    <div class="progress-fill" style="width: {{ s.progress * 100 }}%"></div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="tab-content" data-tab-content="feed">
+                        <div class="feed-layout">
+                            <aside class="feed-rail">
+                                <div id="feedRailNav"></div>
+                            </aside>
+                            <div class="feed-stream" id="feedStream"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -121,15 +136,8 @@
                 </div>
 
                 <div class="panel">
-                    <h2>Recent Activities</h2>
-                    <ul class="activities-list">
-                        {% for a in data.activities %}
-                        <li class="activity-item">
-                            <div class="activity-date" {% if a.date_iso %}data-date-iso="{{ a.date_iso }}"{% endif %}>{{ a.date }}</div>
-                            <div class="activity-text">{{ a.text }}</div>
-                        </li>
-                        {% endfor %}
-                    </ul>
+                    <h2>Feed Breakdown</h2>
+                    <div id="activityTypeSummary" class="active-skills-list"></div>
                 </div>
             </div>
         </div>
@@ -198,13 +206,6 @@
         if (lu && lu.textContent !== 'Never') {
             lu.textContent = new Date(lu.textContent).toLocaleString();
         }
-        document.querySelectorAll('.activity-date[data-date-iso]').forEach((el) => {
-            const iso = el.dataset.dateIso;
-            const dt = new Date(iso);
-            if (!Number.isNaN(dt.valueOf())) {
-                el.textContent = dt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-            }
-        });
 
         // Manual Update Button
         document.getElementById('updateBtn').addEventListener('click', async (e) => {
@@ -214,6 +215,187 @@
         });
 
         {% if data %}
+        const activitiesData = {{ data.activities | tojson }};
+
+        function formatFeedDayLabel(dayDate, now) {
+            const dayStart = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate());
+            const nowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const diffDays = Math.round((nowStart - dayStart) / 86400000);
+            if (diffDays === 0) return 'Today';
+            if (diffDays === 1) return 'Yesterday';
+            return dayDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function groupActivitiesByDay(items) {
+            const groups = new Map();
+            items.forEach((activity) => {
+                const dt = activity.date_iso ? new Date(activity.date_iso) : null;
+                if (dt && !Number.isNaN(dt.valueOf())) {
+                    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                    if (!groups.has(key)) groups.set(key, { dt, items: [] });
+                    groups.get(key).items.push(activity);
+                    return;
+                }
+                if (!groups.has('Unknown')) groups.set('Unknown', { dt: null, items: [] });
+                groups.get('Unknown').items.push(activity);
+            });
+            return [...groups.entries()].map(([key, value], idx) => ({
+                key,
+                id: `feed-day-${key.replace(/[^0-9A-Za-z_-]/g, '-') || (idx + 1)}`,
+                dt: value.dt,
+                items: value.items
+            }));
+        }
+
+        function renderActivityFeed(items) {
+            const rail = document.getElementById('feedRailNav');
+            const stream = document.getElementById('feedStream');
+            const summary = document.getElementById('activityTypeSummary');
+            if (!rail || !stream || !summary) return;
+
+            rail.innerHTML = '';
+            stream.innerHTML = '';
+            summary.innerHTML = '';
+
+            const groups = groupActivitiesByDay(items);
+            const now = new Date();
+            const typeCounts = new Map();
+
+            if (!groups.length) {
+                const empty = document.createElement('div');
+                empty.className = 'summary-label';
+                empty.textContent = 'No activities yet.';
+                stream.appendChild(empty);
+                return;
+            }
+
+            groups.forEach((group) => {
+                const railBtn = document.createElement('a');
+                railBtn.href = `#${group.id}`;
+                railBtn.className = 'feed-rail-link';
+                railBtn.textContent = group.dt ? formatFeedDayLabel(group.dt, now) : 'Unknown Date';
+                rail.appendChild(railBtn);
+
+                const section = document.createElement('section');
+                section.className = 'feed-day-group';
+                section.id = group.id;
+
+                const dayTitle = document.createElement('h3');
+                dayTitle.className = 'feed-day-title';
+                dayTitle.textContent = group.dt ? formatFeedDayLabel(group.dt, now) : 'Unknown Date';
+                section.appendChild(dayTitle);
+
+                const cardFlow = document.createElement('div');
+                cardFlow.className = 'feed-card-flow';
+
+                group.items.forEach((activity) => {
+                    const card = document.createElement('article');
+                    card.className = `feed-card feed-type-${activity.type_key || 'activity'}`;
+                    if (activity.id != null) card.id = `feed-activity-${activity.id}`;
+
+                    const header = document.createElement('div');
+                    header.className = 'feed-card-header';
+                    const title = document.createElement('h4');
+                    title.className = 'feed-card-title';
+                    title.textContent = activity.details ?? activity.text;
+
+                    if (activity.id != null) {
+                        const link = document.createElement('a');
+                        link.className = 'feed-card-permalink';
+                        link.href = `?tab=feed#feed-activity-${activity.id}`;
+                        link.title = 'Permalink to this activity';
+                        link.textContent = 'link';
+                        header.appendChild(title);
+                        header.appendChild(link);
+                    } else {
+                        header.appendChild(title);
+                    }
+
+                    const date = document.createElement('div');
+                    date.className = 'feed-card-date';
+                    if (activity.date_iso) {
+                        const dt = new Date(activity.date_iso);
+                        date.textContent = Number.isNaN(dt.valueOf())
+                            ? activity.date
+                            : dt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+                    } else {
+                        date.textContent = activity.date || '';
+                    }
+
+                    card.appendChild(header);
+                    card.appendChild(date);
+                    cardFlow.appendChild(card);
+
+                    const typeLabel = activity.type_label || 'Activity';
+                    typeCounts.set(typeLabel, (typeCounts.get(typeLabel) || 0) + 1);
+                });
+
+                section.appendChild(cardFlow);
+                stream.appendChild(section);
+            });
+
+            [...typeCounts.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .forEach(([label, count]) => {
+                    const row = document.createElement('div');
+                    row.className = 'active-skill-row';
+                    const l = document.createElement('span');
+                    l.textContent = label;
+                    const c = document.createElement('span');
+                    c.textContent = numberFmt.format(count);
+                    row.appendChild(l);
+                    row.appendChild(c);
+                    summary.appendChild(row);
+                });
+        }
+
+        function readTabFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const tab = params.get('tab');
+            if (tab === 'feed' || tab === 'skills') return tab;
+            return null;
+        }
+
+        function writeTabToUrl(tab) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('tab', tab);
+            window.history.replaceState(null, '', `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+        }
+
+        function activateTab(tab, updateUrl = true) {
+            document.querySelectorAll('.tab-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            document.querySelectorAll('.tab-content').forEach((content) => {
+                content.classList.toggle('active', content.dataset.tabContent === tab);
+            });
+            const meta = document.getElementById('tabMetaText');
+            if (meta) {
+                meta.textContent = tab === 'skills'
+                    ? 'Gains shown: today (UTC)'
+                    : `${numberFmt.format(activitiesData.length)} total activities`;
+            }
+            if (updateUrl) writeTabToUrl(tab);
+        }
+
+        document.querySelectorAll('.tab-btn').forEach((btn) => {
+            btn.addEventListener('click', () => activateTab(btn.dataset.tab, true));
+        });
+
+        renderActivityFeed(activitiesData);
+
+        const hash = window.location.hash || '';
+        const hashTargetsFeed = hash.startsWith('#feed-day-') || hash.startsWith('#feed-activity-');
+        const initialTab = hashTargetsFeed ? 'feed' : (readTabFromUrl() || 'skills');
+        activateTab(initialTab, false);
+
+        window.addEventListener('hashchange', () => {
+            const h = window.location.hash || '';
+            if (h.startsWith('#feed-day-') || h.startsWith('#feed-activity-')) {
+                activateTab('feed', true);
+            }
+        });
+
         // Static total XP chart (30 days)
         new Chart(document.getElementById('totalXpChart').getContext('2d'), {
             type: 'line',

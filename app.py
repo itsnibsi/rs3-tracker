@@ -95,7 +95,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 admin_security = HTTPBasic()
 
 
-def require_admin(credentials: Annotated[HTTPBasicCredentials, Depends(admin_security)]):
+def require_admin(
+    credentials: Annotated[HTTPBasicCredentials, Depends(admin_security)],
+):
     admin_user = os.getenv("ADMIN_USERNAME")
     admin_password = os.getenv("ADMIN_PASSWORD")
     if not admin_user or not admin_password:
@@ -191,6 +193,25 @@ def parse_activity_ts(ts):
         except ValueError:
             continue
     return None
+
+
+def classify_activity(text):
+    lowered = (text or "").lower()
+    if "quest" in lowered:
+        return "quest", "Quest"
+    if "clue" in lowered or "treasure trail" in lowered:
+        return "clue", "Clue"
+    if "levelled" in lowered or "leveled" in lowered or "advanced" in lowered:
+        return "level", "Level Up"
+    if "killed" in lowered or "defeated" in lowered or "slain" in lowered:
+        return "kill", "Kill"
+    if "drop" in lowered or "received" in lowered or "found" in lowered:
+        return "loot", "Loot"
+    if "achievement" in lowered or "completed" in lowered:
+        return "achievement", "Achievement"
+    if "unlocked" in lowered:
+        return "unlock", "Unlock"
+    return "activity", "Activity"
 
 
 def normalize_bucket(timeframe):
@@ -380,7 +401,9 @@ def aggregate_bucket_totals(rows, bucket, starts, value_key, scale_fn=scale_tota
     return values
 
 
-def aggregate_last_snapshot_totals(rows, bucket, starts, value_key, scale_fn=scale_total_xp):
+def aggregate_last_snapshot_totals(
+    rows, bucket, starts, value_key, scale_fn=scale_total_xp
+):
     parsed = [
         (parse_snapshot_ts(row["timestamp"]), row[value_key])
         for row in rows
@@ -413,7 +436,9 @@ def aggregate_last_snapshot_totals(rows, bucket, starts, value_key, scale_fn=sca
             continue
 
         seen_data = True
-        values.append(scale_fn(bucket_close if bucket_close is not None else previous_close))
+        values.append(
+            scale_fn(bucket_close if bucket_close is not None else previous_close)
+        )
         if bucket_close is not None:
             previous_close = bucket_close
 
@@ -554,7 +579,8 @@ def get_dashboard_data():
         prev_skills_map = {}
         if prev_today:
             cur.execute(
-                "SELECT skill, xp FROM skills WHERE snapshot_id = ?", (prev_today["id"],)
+                "SELECT skill, xp FROM skills WHERE snapshot_id = ?",
+                (prev_today["id"],),
             )
             for r in cur.fetchall():
                 prev_skills_map[r["skill"]] = r["xp"]
@@ -597,22 +623,37 @@ def get_dashboard_data():
         )
         closest_levels = sorted(level_candidates, key=lambda s: s["xp_to_next"])[:3]
 
-        cur.execute("SELECT text, date FROM activities")
+        cur.execute("SELECT id, text, date, details FROM activities")
         activities = []
         for row in cur.fetchall():
             parsed = parse_activity_ts(row["date"])
+            type_key, type_label = classify_activity(row["text"])
             activities.append(
                 {
+                    "id": row["id"],
                     "text": row["text"],
                     "date": row["date"],
-                    "date_iso": parsed.isoformat().replace("+00:00", "Z") if parsed else None,
+                    "details": row["details"],
+                    "date_iso": parsed.isoformat().replace("+00:00", "Z")
+                    if parsed
+                    else None,
                     "sort_ts": parsed or datetime.min.replace(tzinfo=timezone.utc),
+                    "type_key": type_key,
+                    "type_label": type_label,
                 }
             )
-        activities.sort(key=lambda a: a["sort_ts"], reverse=True)
+        activities.sort(key=lambda a: (a["sort_ts"], a["id"]), reverse=True)
         activities = [
-            {"text": a["text"], "date": a["date"], "date_iso": a["date_iso"]}
-            for a in activities[:20]
+            {
+                "id": a["id"],
+                "text": a["text"],
+                "date": a["date"],
+                "details": a["details"],
+                "date_iso": a["date_iso"],
+                "type_key": a["type_key"],
+                "type_label": a["type_label"],
+            }
+            for a in activities
         ]
 
         cur.execute(
@@ -703,8 +744,7 @@ def api_skills_totals(timeframe: str = "day"):
             JOIN snapshots s ON sk.snapshot_id = s.id
             WHERE s.timestamp < ?
             ORDER BY s.timestamp ASC
-        """
-            ,
+        """,
             (end_exclusive,),
         )
         rows = cur.fetchall()
@@ -815,7 +855,9 @@ def admin_run_sql(
         return render_admin_page(request, sql=sql, sql_error="SQL query is required.")
 
     # sqlite3.execute only allows one statement; this avoids accidental multi-step scripts.
-    statement_no_trailing = statement[:-1].strip() if statement.endswith(";") else statement
+    statement_no_trailing = (
+        statement[:-1].strip() if statement.endswith(";") else statement
+    )
     if ";" in statement_no_trailing:
         return render_admin_page(
             request,
@@ -827,7 +869,9 @@ def admin_run_sql(
         with get_conn() as conn:
             cur = conn.cursor()
             cur.execute(statement)
-            keyword = statement.split(maxsplit=1)[0].lower() if statement.split() else ""
+            keyword = (
+                statement.split(maxsplit=1)[0].lower() if statement.split() else ""
+            )
             if keyword in {"select", "pragma", "with"}:
                 rows = cur.fetchmany(200)
                 columns = [d[0] for d in (cur.description or [])]
@@ -859,7 +903,9 @@ def admin_collect_now(
         collect_snapshot()
         return render_admin_page(request, message="Snapshot collected successfully.")
     except Exception as exc:
-        return render_admin_page(request, sql_error=f"Snapshot collection failed: {exc}")
+        return render_admin_page(
+            request, sql_error=f"Snapshot collection failed: {exc}"
+        )
 
 
 @app.post("/admin/maintenance/vacuum", response_class=HTMLResponse)

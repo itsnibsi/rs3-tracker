@@ -43,7 +43,11 @@ SKILL_NAMES = {
 }
 
 
-def hash_activity(text, date):
+def hash_activity(text, date, details):
+    return hashlib.sha256(f"{text}|{date}|{details or ''}".encode()).hexdigest()
+
+
+def legacy_hash_activity(text, date):
     return hashlib.sha256(f"{text}|{date}".encode()).hexdigest()
 
 
@@ -106,11 +110,19 @@ def collect_snapshot():
         )
 
         for act in data.get("activities", []):
-            h = hash_activity(act["text"], act["date"])
+            details = act.get("details")
+            h = hash_activity(act["text"], act["date"], details)
+            legacy_h = legacy_hash_activity(act["text"], act["date"])
+            cur.execute(
+                "SELECT 1 FROM activities WHERE hash IN (?, ?) LIMIT 1",
+                (h, legacy_h),
+            )
+            if cur.fetchone():
+                continue
             try:
                 cur.execute(
-                    "INSERT INTO activities (snapshot_id, text, date, hash) VALUES (?, ?, ?, ?)",
-                    (snapshot_id, act["text"], act["date"], h),
+                    "INSERT INTO activities (snapshot_id, text, date, details, hash) VALUES (?, ?, ?, ?, ?)",
+                    (snapshot_id, act["text"], act["date"], details, h),
                 )
             except sqlite3.IntegrityError:
                 pass  # Duplicate activity, ignore
