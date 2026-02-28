@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from db import get_conn
+from db import get_conn, init_db
 
 USERNAME = os.getenv("RS3_USERNAME", "Varxis")
 API_URL = f"https://apps.runescape.com/runemetrics/profile/profile?user={USERNAME}&activities=20"
@@ -51,6 +51,25 @@ def legacy_hash_activity(text, date):
     return hashlib.sha256(f"{text}|{date}".encode()).hexdigest()
 
 
+def to_int(value, default=0):
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").strip()
+        if not cleaned:
+            return default
+        try:
+            return int(cleaned)
+        except ValueError:
+            return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def collect_snapshot():
     try:
         r = requests.get(API_URL, timeout=15)
@@ -71,22 +90,37 @@ def collect_snapshot():
         cur.execute("SELECT id FROM players WHERE username=?", (USERNAME,))
         player_id = cur.fetchone()["id"]
 
-        rank = data.get("rank", "0")
-        if isinstance(rank, str):
-            rank = int(rank.replace(",", ""))
+        rank = to_int(data.get("rank"), 0)
+        total_xp = to_int(data.get("totalxp"), 0)
+        total_level = to_int(data.get("totalskill"), 0)
+        combat_level = to_int(data.get("combatlevel"), 0)
+        quests_started = to_int(data.get("questsstarted"), 0)
+        quests_complete = to_int(data.get("questscomplete"), 0)
+        quests_not_started = to_int(data.get("questsnotstarted"), 0)
 
         cur.execute(
             """
-            INSERT INTO snapshots (player_id, total_xp, total_level, overall_rank, combat_level, quest_points)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO snapshots (
+                player_id,
+                total_xp,
+                total_level,
+                overall_rank,
+                combat_level,
+                quests_started,
+                quests_complete,
+                quests_not_started
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 player_id,
-                data["totalxp"],
-                data["totalskill"],
+                total_xp,
+                total_level,
                 rank,
-                data["combatlevel"],
-                data["questsstarted"],
+                combat_level,
+                quests_started,
+                quests_complete,
+                quests_not_started,
             ),
         )
         snapshot_id = cur.lastrowid
@@ -98,9 +132,9 @@ def collect_snapshot():
                 (
                     snapshot_id,
                     skill_name,
-                    skill["level"],
-                    skill["xp"],
-                    skill.get("rank", 0),
+                    to_int(skill.get("level"), 0),
+                    to_int(skill.get("xp"), 0),
+                    to_int(skill.get("rank"), 0),
                 )
             )
 
@@ -129,9 +163,10 @@ def collect_snapshot():
 
         conn.commit()
     print(
-        f"Collected snapshot for {USERNAME} at {datetime.now(timezone.utc).isoformat()} - Total XP: {data['totalxp']}"
+        f"Collected snapshot for {USERNAME} at {datetime.now(timezone.utc).isoformat()} - Total XP: {total_xp}"
     )
 
 
 if __name__ == "__main__":
+    init_db()
     collect_snapshot()

@@ -1,20 +1,54 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'europe-north1-docker.pkg.dev/$PROJECT_ID/rs3-tracker/rs3-tracker:$COMMIT_SHA', '.']
-
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'europe-north1-docker.pkg.dev/$PROJECT_ID/rs3-tracker/rs3-tracker:$COMMIT_SHA']
-
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
     args:
       [
-        'run', 'deploy', 'rs3-tracker',
-        '--image', 'europe-north1-docker.pkg.dev/$PROJECT_ID/rs3-tracker/rs3-tracker:$COMMIT_SHA',
-        '--region', 'europe-north1',
-        '--platform', 'managed',
-        '--allow-unauthenticated'
+        'build',
+        '-t',
+        '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:$COMMIT_SHA',
+        '.'
       ]
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      [
+        'push',
+        '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:$COMMIT_SHA'
+      ]
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        IMAGE_URI="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:$COMMIT_SHA"
+
+        deploy_args=(
+          run deploy "${_SERVICE}"
+          --image "${IMAGE_URI}"
+          --region "${_REGION}"
+          --platform managed
+          --allow-unauthenticated
+        )
+
+        if [[ -n "${_ADMIN_USERNAME_SECRET}" && -n "${_ADMIN_PASSWORD_SECRET}" ]]; then
+          deploy_args+=(
+            --set-secrets
+            "ADMIN_USERNAME=${_ADMIN_USERNAME_SECRET}:latest,ADMIN_PASSWORD=${_ADMIN_PASSWORD_SECRET}:latest"
+          )
+          echo "Deploying with Secret Manager admin credentials."
+        else
+          echo "Deploying without Secret Manager substitutions."
+        fi
+
+        gcloud "${deploy_args[@]}"
+
+substitutions:
+  _REGION: europe-north1
+  _REPOSITORY: rs3-tracker
+  _IMAGE: rs3-tracker
+  _SERVICE: rs3-tracker
+  _ADMIN_USERNAME_SECRET: 'rs3-admin-username'
+  _ADMIN_PASSWORD_SECRET: 'rs3-admin-password'
 
 options:
   logging: CLOUD_LOGGING_ONLY
