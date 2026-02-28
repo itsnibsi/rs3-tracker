@@ -17,4 +17,22 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["app", "collector", "db", "utils"]
+py-modules = [
+    "app",
+    "collector",
+    "config",
+    "db",
+    "log",
+    "skills",
+    "utils",
+    "web",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["services*", "routes*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

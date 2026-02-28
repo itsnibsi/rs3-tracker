@@ -63,12 +63,15 @@
             <h2>Maintenance</h2>
             <div class="admin-actions">
                 <form method="post" action="/admin/maintenance/update">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="tf-btn">Collect Snapshot Now</button>
                 </form>
                 <form method="post" action="/admin/maintenance/checkpoint">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="tf-btn">Run WAL Checkpoint</button>
                 </form>
                 <form method="post" action="/admin/maintenance/vacuum">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="tf-btn">Run VACUUM</button>
                 </form>
             </div>
@@ -80,7 +83,9 @@
                 Executes one SQL statement at a time. Query results are capped to 200 rows.
             </div>
             <form method="post" action="/admin/sql">
-                <textarea class="admin-sql-input" name="sql" placeholder="SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 10;">{{ sql }}</textarea>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <textarea class="admin-sql-input" name="sql"
+                    placeholder="SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 10;">{{ sql }}</textarea>
                 <div style="margin-top: 10px;">
                     <button type="submit" class="tf-btn">Run SQL</button>
                 </div>
