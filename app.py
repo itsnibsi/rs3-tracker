@@ -718,7 +718,16 @@ def get_dashboard_data():
         latest_dict["total_xp_display"] = format_total_xp(latest["total_xp"])
 
         xp_today = max(0, latest["total_xp"] - prev_today["total_xp"])
-        ranks_climbed_today = max(0, prev_today["overall_rank"] - latest["overall_rank"])
+        rank_delta_today = prev_today["overall_rank"] - latest["overall_rank"]
+        if rank_delta_today > 0:
+            rank_delta_today_display = f"+{rank_delta_today:,}"
+            rank_delta_today_class = "xp-gain-positive"
+        elif rank_delta_today < 0:
+            rank_delta_today_display = f"-{abs(rank_delta_today):,}"
+            rank_delta_today_class = "xp-gain-negative"
+        else:
+            rank_delta_today_display = "0"
+            rank_delta_today_class = ""
         xp_24h = latest["total_xp"] - prev_24h["total_xp"]
         xp_7d = latest["total_xp"] - prev_7d["total_xp"]
 
@@ -729,8 +738,9 @@ def get_dashboard_data():
                 "xp_today_display": format_total_xp(xp_today),
                 "levels_gained_today": levels_gained_today,
                 "quests_finished_today": today_quests_finished,
-                "ranks_climbed_today": ranks_climbed_today,
-                "ranks_climbed_today_display": f"{ranks_climbed_today:,}",
+                "rank_delta_today": rank_delta_today,
+                "rank_delta_today_display": rank_delta_today_display,
+                "rank_delta_today_class": rank_delta_today_class,
             },
             "xp_24h": xp_24h,
             "xp_7d": xp_7d,

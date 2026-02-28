@@ -5,6 +5,7 @@
     --text-muted: #9aa1ab;
     --accent: #8da0b6;
     --success: #75bc7a;
+    --danger: #dc8f81;
     --border: #31353c;
     --surface-2: #121519;
 }
@@ -65,10 +66,12 @@ h2 {
     margin-bottom: 8px;
 }
 
-.stat-value {
-    font-size: 1.5rem;
+.stat-title-main {
+    color: var(--text-main);
+    font-size: 1.3rem;
+    text-transform: none;
     font-weight: 700;
-    color: var(--accent);
+    margin-bottom: 12px;
 }
 
 .stat-gain {
@@ -77,19 +80,16 @@ h2 {
     margin-top: 4px;
 }
 
-.summary-row {
+.summary-metrics {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
-    margin-top: auto;
-    padding-top: 14px;
+    align-content: start;
 }
 
-.summary-cell {
-    background: rgba(18, 21, 25, 0.72);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
+.summary-metric {
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
 }
 
 .summary-label {
@@ -176,7 +176,7 @@ h2 {
         grid-template-columns: 1fr 1fr;
     }
 
-    .summary-row {
+    .summary-metrics {
         grid-template-columns: 1fr;
     }
 
@@ -285,6 +285,10 @@ h2 {
     color: var(--success);
 }
 
+.xp-gain-negative {
+    color: var(--danger);
+}
+
 .progress-bg {
     background: var(--surface-2);
     height: 6px;
@@ -343,13 +347,20 @@ h2 {
 
 .feed-rail-link {
     display: block;
-    text-decoration: none;
+    width: 100%;
+    background: transparent;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
     color: var(--text-muted);
     border-left: 2px solid var(--border);
     padding: 6px 8px;
     margin-bottom: 3px;
     font-size: 0.82rem;
+    text-align: left;
+    font: inherit;
     transition: color 0.15s ease, border-color 0.15s ease;
+    cursor: pointer;
 }
 
 .feed-rail-link:hover {
@@ -663,6 +674,7 @@ h2 {
         display: inline-block;
         margin-right: 6px;
         margin-bottom: 0;
+        width: auto;
     }
 
     .feed-card-flow {

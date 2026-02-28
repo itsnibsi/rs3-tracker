@@ -19,7 +19,7 @@
     <div class="container">
         <header>
             <div>
-                <h1>{{ data.player_name if data else 'RS3 Tracker' }}</h1>
+                <h1>RS3 Tracker</h1>
                 <div style="color: var(--text-muted)">
                     Last updated: <span id="lastUpdated">{{ data.latest.timestamp if data else 'Never' }}</span>
                 </div>
@@ -33,18 +33,21 @@
         {% if data %}
         <div class="stats-grid">
             <div class="stat-card stat-card-wide">
-                <div class="stat-title">Account Summary</div>
-                <div class="stat-value">{{ data.latest.total_xp_display }} XP</div>
-                <div class="summary-row">
-                    <div class="summary-cell">
+                <div class="stat-title stat-title-main">{{ data.player_name }}</div>
+                <div class="summary-metrics">
+                    <div class="summary-metric">
+                        <div class="summary-label">Total XP</div>
+                        <div class="summary-value">{{ data.latest.total_xp_display }}</div>
+                    </div>
+                    <div class="summary-metric">
                         <div class="summary-label">Total Level</div>
                         <div class="summary-value">{{ "{:,}".format(data.latest.total_level) }}</div>
                     </div>
-                    <div class="summary-cell">
+                    <div class="summary-metric">
                         <div class="summary-label">Overall Rank</div>
                         <div class="summary-value">{{ "{:,}".format(data.latest.overall_rank) }}</div>
                     </div>
-                    <div class="summary-cell">
+                    <div class="summary-metric">
                         <div class="summary-label">Combat</div>
                         <div class="summary-value">{{ data.latest.combat_level }}</div>
                     </div>
@@ -74,15 +77,21 @@
                     </div>
                     <div class="active-skill-row">
                         <span>Levels Gained</span>
-                        <span>{{ "{:,}".format(data.today_highlights.levels_gained_today) }}</span>
+                        <span class="{{ 'xp-gain-positive' if data.today_highlights.levels_gained_today > 0 else '' }}">
+                            {{ '+' if data.today_highlights.levels_gained_today > 0 else '' }}{{ "{:,}".format(data.today_highlights.levels_gained_today) }}
+                        </span>
                     </div>
                     <div class="active-skill-row">
                         <span>Quests Finished</span>
-                        <span>{{ "{:,}".format(data.today_highlights.quests_finished_today) }}</span>
+                        <span class="{{ 'xp-gain-positive' if data.today_highlights.quests_finished_today > 0 else '' }}">
+                            {{ '+' if data.today_highlights.quests_finished_today > 0 else '' }}{{ "{:,}".format(data.today_highlights.quests_finished_today) }}
+                        </span>
                     </div>
                     <div class="active-skill-row">
-                        <span>Ranks Climbed</span>
-                        <span>{{ data.today_highlights.ranks_climbed_today_display }}</span>
+                        <span>Rank Change</span>
+                        <span class="{{ data.today_highlights.rank_delta_today_class }}">
+                            {{ data.today_highlights.rank_delta_today_display }}
+                        </span>
                     </div>
                 </div>
             </div>
@@ -254,9 +263,8 @@
                 if (!groups.has('Unknown')) groups.set('Unknown', { dt: null, items: [] });
                 groups.get('Unknown').items.push(activity);
             });
-            return [...groups.entries()].map(([key, value], idx) => ({
+            return [...groups.entries()].map(([key, value]) => ({
                 key,
-                id: `feed-day-${key.replace(/[^0-9A-Za-z_-]/g, '-') || (idx + 1)}`,
                 dt: value.dt,
                 items: value.items
             }));
@@ -283,15 +291,17 @@
             }
 
             groups.forEach((group) => {
-                const railBtn = document.createElement('a');
-                railBtn.href = `#${group.id}`;
-                railBtn.className = 'feed-rail-link';
-                railBtn.textContent = group.dt ? formatFeedDayLabel(group.dt, now) : 'Unknown Date';
-                rail.appendChild(railBtn);
-
                 const section = document.createElement('section');
                 section.className = 'feed-day-group';
-                section.id = group.id;
+
+                const railBtn = document.createElement('button');
+                railBtn.type = 'button';
+                railBtn.className = 'feed-rail-link';
+                railBtn.textContent = group.dt ? formatFeedDayLabel(group.dt, now) : 'Unknown Date';
+                railBtn.addEventListener('click', () => {
+                    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+                rail.appendChild(railBtn);
 
                 const dayTitle = document.createElement('h3');
                 dayTitle.className = 'feed-day-title';
@@ -304,7 +314,6 @@
                 group.items.forEach((activity) => {
                     const card = document.createElement('article');
                     card.className = `feed-card feed-type-${activity.type_key || 'activity'}`;
-                    if (activity.id != null) card.id = `feed-activity-${activity.id}`;
                     if (activity.color) card.style.setProperty('--card-accent', activity.color);
 
                     const rail = document.createElement('div');
@@ -359,46 +368,21 @@
                 });
         }
 
-        function readTabFromUrl() {
-            const params = new URLSearchParams(window.location.search);
-            const tab = params.get('tab');
-            if (tab === 'feed' || tab === 'skills') return tab;
-            return null;
-        }
-
-        function writeTabToUrl(tab) {
-            const url = new URL(window.location.href);
-            url.searchParams.set('tab', tab);
-            window.history.replaceState(null, '', `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
-        }
-
-        function activateTab(tab, updateUrl = true) {
+        function activateTab(tab) {
             document.querySelectorAll('.tab-btn').forEach((btn) => {
                 btn.classList.toggle('active', btn.dataset.tab === tab);
             });
             document.querySelectorAll('.tab-content').forEach((content) => {
                 content.classList.toggle('active', content.dataset.tabContent === tab);
             });
-            if (updateUrl) writeTabToUrl(tab);
         }
 
         document.querySelectorAll('.tab-btn').forEach((btn) => {
-            btn.addEventListener('click', () => activateTab(btn.dataset.tab, true));
+            btn.addEventListener('click', () => activateTab(btn.dataset.tab));
         });
 
         renderActivityFeed(activitiesData);
-
-        const hash = window.location.hash || '';
-        const hashTargetsFeed = hash.startsWith('#feed-day-') || hash.startsWith('#feed-activity-');
-        const initialTab = hashTargetsFeed ? 'feed' : (readTabFromUrl() || 'skills');
-        activateTab(initialTab, false);
-
-        window.addEventListener('hashchange', () => {
-            const h = window.location.hash || '';
-            if (h.startsWith('#feed-day-') || h.startsWith('#feed-activity-')) {
-                activateTab('feed', true);
-            }
-        });
+        activateTab('skills');
 
         // Static total XP chart (30 days)
         new Chart(document.getElementById('totalXpChart').getContext('2d'), {
