@@ -77,9 +77,15 @@ def _migration_snapshots_quest_fields(conn: sqlite3.Connection):
     """)
 
 
+def _migration_add_hash_to_activities(conn: sqlite3.Connection):
+    if "hash" not in _get_table_columns(conn, "activities"):
+        conn.execute("ALTER TABLE activities ADD COLUMN hash TEXT UNIQUE")
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260228_01_activity_details", _migration_add_activity_details),
     ("20260228_02_snapshot_quest_fields", _migration_snapshots_quest_fields),
+    ("20260228_03_activity_hash", _migration_add_hash_to_activities),
 ]
 
 
