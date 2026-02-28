@@ -1,36 +1,118 @@
 <!DOCTYPE html>
 <html>
+
 <head>
-    <title>RS3 Tracker</title>
+    <title>RS3 Tracker Dashboard</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body>
-<div class="container">
-    <h1>RS3 Tracker</h1>
 
-    <div class="stats">
-        <div>XP (24h): {{ xp_24h }}</div>
-        <div>XP (7d): {{ xp_7d }}</div>
+<body>
+    <div class="container">
+        <h1>RS3 Tracker</h1>
+
+        <div class="stats">
+            <div>Total XP: {{ total_stats.total_xp }}</div>
+            <div>Total Level: {{ total_stats.total_level }}</div>
+            <div>Combat Level: {{ total_stats.combat_level }}</div>
+            <div>Overall Rank: {{ total_stats.overall_rank }}</div>
+            <div>24h Gain: {{ xp_24h }}</div>
+            <div>7d Gain: {{ xp_7d }}</div>
+            <div>XP Streak: {{ streak_days }} days</div>
+        </div>
+
+        <h2>Skills</h2>
+        <table id="skills-table">
+            <tr>
+                <th>Skill</th>
+                <th>Level</th>
+                <th>XP</th>
+                <th>XP (24h)</th>
+                <th>Rank</th>
+                <th>Progress</th>
+            </tr>
+            {% for s in skills %}
+            <tr class="skill-row" data-skill="{{ s.skill }}">
+                <td>{{ s.skill }}</td>
+                <td>{{ s.level }}</td>
+                <td>{{ s.xp }}</td>
+                <td>{{ s.xp_gain }}</td>
+                <td>{{ s.rank }}</td>
+                <td>
+                    <div class="progress-bar">
+                        <div class="progress" style="width: {{ (s.progress * 100)|round(1) }}%"></div>
+                    </div>
+                </td>
+            </tr>
+            <tr class="skill-chart-row" style="display:none;">
+                <td colspan="6">
+                    <canvas class="skill-chart" width="800" height="200"></canvas>
+                    <div>
+                        Timeframe:
+                        <button class="tf-btn" data-timeframe="hour">Hour</button>
+                        <button class="tf-btn" data-timeframe="day">Day</button>
+                        <button class="tf-btn" data-timeframe="week">Week</button>
+                        <button class="tf-btn" data-timeframe="month">Month</button>
+                        <button class="tf-btn" data-timeframe="year">Year</button>
+                        <button class="tf-btn" data-timeframe="all">All</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+
+        <h2>Recent Activities</h2>
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Activity</th>
+            </tr>
+            {% for a in activities %}
+            <tr>
+                <td>{{ a.date }}</td>
+                <td>{{ a.text }}</td>
+            </tr>
+            {% endfor %}
+        </table>
     </div>
 
-    <canvas id="xpChart"></canvas>
+    <script>
+        // Skill row click: toggle chart
+        document.querySelectorAll('.skill-row').forEach(row => {
+            row.addEventListener('click', async () => {
+                const nextRow = row.nextElementSibling;
+                const canvas = nextRow.querySelector('canvas');
+                const skill = row.dataset.skill;
 
-    <a href="/skills">View Skills</a>
-</div>
+                if (nextRow.style.display === 'none') {
+                    nextRow.style.display = '';
+                    const data = await fetch(`/skill_history/${skill}?timeframe=all`).then(r => r.json());
+                    const labels = data.map(d => d.timestamp);
+                    const xp = data.map(d => d.xp);
+                    if (canvas.chart) canvas.chart.destroy();
+                    canvas.chart = new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: skill + ' XP', data: xp, borderWidth: 2 }] } });
+                } else {
+                    nextRow.style.display = 'none';
+                }
+            });
+        });
 
-<script>
-new Chart(document.getElementById('xpChart'), {
-    type: 'line',
-    data: {
-        labels: {{ timestamps | safe }},
-        datasets: [{
-            label: 'Total XP',
-            data: {{ xp | safe }},
-            borderWidth: 2
-        }]
-    }
-});
-</script>
+        // Timeframe buttons
+        document.querySelectorAll('.tf-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const tr = e.target.closest('tr').previousElementSibling;
+                const skill = tr.dataset.skill;
+                const canvas = tr.nextElementSibling.querySelector('canvas');
+                const timeframe = e.target.dataset.timeframe;
+
+                const data = await fetch(`/skill_history/${skill}?timeframe=${timeframe}`).then(r => r.json());
+                const labels = data.map(d => d.timestamp);
+                const xp = data.map(d => d.xp);
+                if (canvas.chart) canvas.chart.destroy();
+                canvas.chart = new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: skill + ' XP', data: xp, borderWidth: 2 }] } });
+            });
+        });
+    </script>
 </body>
+
 </html>

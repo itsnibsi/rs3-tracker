@@ -1,39 +1,48 @@
 body {
-    font-family: system-ui, sans-serif;
-    background: #f4f4f4;
-    color: #222;
-    margin: 0;
+    font-family: system-ui;
+    background: #111;
+    color: #eee;
+    margin: 40px;
 }
 
-.container {
-    max-width: 900px;
-    margin: 40px auto;
-    padding: 20px;
-    background: white;
-    border-radius: 6px;
+a {
+    color: #9ad;
+    text-decoration: none;
 }
 
-h1 {
-    margin-top: 0;
+.skills {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
 }
 
-.stats {
-    display: flex;
-    gap: 40px;
-    margin-bottom: 20px;
+.skill {
+    background: #1a1a1a;
+    padding: 16px;
+    border-radius: 8px;
 }
 
-table {
+.progress {
+    background: #333;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.bar {
+    background: #4caf50;
+    height: 100%;
+}
+
+.progress-bar {
     width: 100%;
-    border-collapse: collapse;
+    height: 15px;
+    background: #222;
+    border-radius: 4px;
+    overflow: hidden;
 }
 
-th,
-td {
-    padding: 8px;
-    text-align: left;
-}
-
-tr:nth-child(even) {
-    background: #f9f9f9;
+.progress {
+    height: 100%;
+    background: #5cf;
 }

@@ -33,8 +33,6 @@ def init_db():
         total_xp INTEGER,
         total_level INTEGER,
         overall_rank INTEGER,
-        
-        
         combat_level INTEGER,
         quest_points INTEGER
     )
@@ -56,8 +54,13 @@ def init_db():
         id INTEGER PRIMARY KEY,
         snapshot_id INTEGER,
         text TEXT,
-        date TEXT
+        date TEXT,
+        hash TEXT
     )
+    """)
+
+    cur.execute("""
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_hash ON activities(hash);
     """)
 
     conn.commit()

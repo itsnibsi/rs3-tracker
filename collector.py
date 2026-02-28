@@ -1,8 +1,15 @@
+import hashlib
+import sqlite3
 import time
 
 import requests
 
 from db import get_conn
+
+
+def hash_activity(text, date):
+    return hashlib.sha256(f"{text}|{date}".encode()).hexdigest()
+
 
 USERNAME = "Varxis"
 API_URL = f"https://apps.runescape.com/runemetrics/profile/profile?user={USERNAME}&activities=20"
@@ -89,13 +96,14 @@ def collect_snapshot():
 
     # Insert activities
     for act in data.get("activities", []):
-        cur.execute(
-            """
-            INSERT INTO activities (snapshot_id, text, date)
-            VALUES (?, ?, ?)
-        """,
-            (snapshot_id, act["text"], act["date"]),
-        )
+        h = hash_activity(act["text"], act["date"])
+        try:
+            cur.execute(
+                "INSERT INTO activities (snapshot_id, text, date, hash) VALUES (?, ?, ?, ?)",
+                (snapshot_id, act["text"], act["date"], h),
+            )
+        except sqlite3.IntegrityError:
+            pass  # duplicate, ignore
 
     conn.commit()
     conn.close()
