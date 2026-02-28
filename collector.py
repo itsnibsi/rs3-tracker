@@ -1,17 +1,13 @@
 import hashlib
+import os
 import sqlite3
-import time
+from datetime import datetime, timezone
 
 import requests
 
 from db import get_conn
 
-
-def hash_activity(text, date):
-    return hashlib.sha256(f"{text}|{date}".encode()).hexdigest()
-
-
-USERNAME = "Varxis"
+USERNAME = os.getenv("RS3_USERNAME", "Varxis")
 API_URL = f"https://apps.runescape.com/runemetrics/profile/profile?user={USERNAME}&activities=20"
 
 SKILL_NAMES = {
@@ -47,70 +43,81 @@ SKILL_NAMES = {
 }
 
 
-def collect_snapshot():
-    r = requests.get(API_URL, timeout=15)
-    data = r.json()
+def hash_activity(text, date):
+    return hashlib.sha256(f"{text}|{date}".encode()).hexdigest()
 
-    if "skillvalues" not in data:
-        print("Invalid response, skipping")
+
+def collect_snapshot():
+    try:
+        r = requests.get(API_URL, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"Failed to fetch data: {e}")
         return
 
-    conn = get_conn()
-    cur = conn.cursor()
+    if "error" in data or "skillvalues" not in data:
+        print(f"Invalid response or profile is private.")
+        return
 
-    # Ensure player exists
-    cur.execute("INSERT OR IGNORE INTO players (username) VALUES (?)", (USERNAME,))
-    cur.execute("SELECT id FROM players WHERE username=?", (USERNAME,))
-    player_id = cur.fetchone()["id"]
+    with get_conn() as conn:
+        cur = conn.cursor()
 
-    # Insert snapshot
-    cur.execute(
-        """
-        INSERT INTO snapshots (player_id, total_xp, total_level, overall_rank, combat_level, quest_points)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """,
-        (
-            player_id,
-            data["totalxp"],
-            data["totalskill"],
-            int(data["rank"].replace(",", "")),
-            data["combatlevel"],
-            data["questsstarted"],
-        ),
-    )
+        cur.execute("INSERT OR IGNORE INTO players (username) VALUES (?)", (USERNAME,))
+        cur.execute("SELECT id FROM players WHERE username=?", (USERNAME,))
+        player_id = cur.fetchone()["id"]
 
-    snapshot_id = cur.lastrowid
-
-    # Insert skills
-    for skill in data["skillvalues"]:
-        skill_id = skill["id"]
-        skill_name = SKILL_NAMES.get(skill_id, f"Unknown-{skill_id}")
+        rank = data.get("rank", "0")
+        if isinstance(rank, str):
+            rank = int(rank.replace(",", ""))
 
         cur.execute(
             """
-            INSERT INTO skills (snapshot_id, skill, level, xp, rank)
-            VALUES (?, ?, ?, ?, ?)
-        """,
-            (snapshot_id, skill_name, skill["level"], skill["xp"], skill["rank"]),
+            INSERT INTO snapshots (player_id, total_xp, total_level, overall_rank, combat_level, quest_points)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                player_id,
+                data["totalxp"],
+                data["totalskill"],
+                rank,
+                data["combatlevel"],
+                data["questsstarted"],
+            ),
+        )
+        snapshot_id = cur.lastrowid
+
+        skills_data = []
+        for skill in data["skillvalues"]:
+            skill_name = SKILL_NAMES.get(skill["id"], f"Unknown-{skill['id']}")
+            skills_data.append(
+                (
+                    snapshot_id,
+                    skill_name,
+                    skill["level"],
+                    skill["xp"],
+                    skill.get("rank", 0),
+                )
+            )
+
+        cur.executemany(
+            "INSERT INTO skills (snapshot_id, skill, level, xp, rank) VALUES (?, ?, ?, ?, ?)",
+            skills_data,
         )
 
-    # Insert activities
-    for act in data.get("activities", []):
-        h = hash_activity(act["text"], act["date"])
-        try:
-            cur.execute(
-                "INSERT INTO activities (snapshot_id, text, date, hash) VALUES (?, ?, ?, ?)",
-                (snapshot_id, act["text"], act["date"], h),
-            )
-        except sqlite3.IntegrityError:
-            pass  # duplicate, ignore
+        for act in data.get("activities", []):
+            h = hash_activity(act["text"], act["date"])
+            try:
+                cur.execute(
+                    "INSERT INTO activities (snapshot_id, text, date, hash) VALUES (?, ?, ?, ?)",
+                    (snapshot_id, act["text"], act["date"], h),
+                )
+            except sqlite3.IntegrityError:
+                pass  # Duplicate activity, ignore
 
-    conn.commit()
-    conn.close()
-
-    # Print something useful
+        conn.commit()
     print(
-        f"Collected snapshot for {USERNAME} at {time.strftime('%Y-%m-%d %H:%M:%S')}, total XP: {data['totalxp']}, total level: {data['totalskill']}"
+        f"Collected snapshot for {USERNAME} at {datetime.now(timezone.utc).isoformat()} - Total XP: {data['totalxp']}"
     )
 
 

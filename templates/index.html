@@ -1,117 +1,247 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <title>RS3 Tracker Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RS3 Tracker</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
 </head>
 
 <body>
     <div class="container">
-        <h1>RS3 Tracker</h1>
+        <header>
+            <div>
+                <h1>RS3 Tracker</h1>
+                <div style="color: var(--text-muted)">
+                    Last updated: <span id="lastUpdated">{{ data.latest.timestamp if data else 'Never' }}</span>
+                </div>
+            </div>
+            <button id="updateBtn" class="tf-btn">Update Now</button>
+        </header>
 
-        <div class="stats">
-            <div>Total XP: {{ total_stats.total_xp }}</div>
-            <div>Total Level: {{ total_stats.total_level }}</div>
-            <div>Combat Level: {{ total_stats.combat_level }}</div>
-            <div>Overall Rank: {{ total_stats.overall_rank }}</div>
-            <div>24h Gain: {{ xp_24h }}</div>
-            <div>7d Gain: {{ xp_7d }}</div>
-            <div>XP Streak: {{ streak_days }} days</div>
+        {% if data %}
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">Total XP</div>
+                <div class="stat-value">{{ data.latest.total_xp_display }}</div>
+                <div class="stat-gain">+{{ data.xp_24h_display }} (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Total Level</div>
+                <div class="stat-value">{{ "{:,}".format(data.latest.total_level) }}</div>
+                <div class="stat-gain">Combat: {{ data.latest.combat_level }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Overall Rank</div>
+                <div class="stat-value">{{ "{:,}".format(data.latest.overall_rank) }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">XP Streak</div>
+                <div class="stat-value">{{ data.streak_days }} Days</div>
+                <div class="stat-gain">+{{ data.xp_7d_display }} (7d)</div>
+            </div>
         </div>
 
-        <h2>Skills</h2>
-        <table id="skills-table">
-            <tr>
-                <th>Skill</th>
-                <th>Level</th>
-                <th>XP</th>
-                <th>XP (24h)</th>
-                <th>Rank</th>
-                <th>Progress</th>
-            </tr>
-            {% for s in skills %}
-            <tr class="skill-row" data-skill="{{ s.skill }}">
-                <td>{{ s.skill }}</td>
-                <td>{{ s.level }}</td>
-                <td>{{ s.xp }}</td>
-                <td>{{ s.xp_gain }}</td>
-                <td>{{ s.rank }}</td>
-                <td>
-                    <div class="progress-bar">
-                        <div class="progress" style="width: {{ (s.progress * 100)|round(1) }}%"></div>
+        <div class="main-content">
+            <div class="left-column">
+                <div class="panel">
+                    <h2>Skills</h2>
+                    <div class="skills-grid">
+                        {% for s in data.skills %}
+                        <div class="skill-card" data-skill="{{ s.skill }}">
+                            <div class="skill-header">
+                                <span class="skill-name">{{ s.skill }}</span>
+                                <span class="skill-level">{{ s.level }}</span>
+                            </div>
+                            <div class="skill-details">
+                                <span>{{ s.xp_display }} XP</span>
+                                {% if s.xp_gain > 0 %}
+                                <span class="xp-gain-positive">+{{ s.xp_gain_display }}</span>
+                                {% else %}
+                                <span>0</span>
+                                {% endif %}
+                            </div>
+                            <div class="progress-bg">
+                                <div class="progress-fill" style="width: {{ s.progress * 100 }}%"></div>
+                            </div>
+                        </div>
+                        {% endfor %}
                     </div>
-                </td>
-            </tr>
-            <tr class="skill-chart-row" style="display:none;">
-                <td colspan="6">
-                    <canvas class="skill-chart" width="800" height="200"></canvas>
-                    <div>
-                        Timeframe:
-                        <button class="tf-btn" data-timeframe="hour">Hour</button>
-                        <button class="tf-btn" data-timeframe="day">Day</button>
-                        <button class="tf-btn" data-timeframe="week">Week</button>
-                        <button class="tf-btn" data-timeframe="month">Month</button>
-                        <button class="tf-btn" data-timeframe="year">Year</button>
-                        <button class="tf-btn" data-timeframe="all">All</button>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </table>
+                </div>
+            </div>
 
-        <h2>Recent Activities</h2>
-        <table>
-            <tr>
-                <th>Date</th>
-                <th>Activity</th>
-            </tr>
-            {% for a in activities %}
-            <tr>
-                <td>{{ a.date }}</td>
-                <td>{{ a.text }}</td>
-            </tr>
-            {% endfor %}
-        </table>
+            <div class="side-panel">
+                <div class="panel" style="margin-bottom: 24px;">
+                    <h2>Total XP (30 Days)</h2>
+                    <canvas id="totalXpChart" height="200"></canvas>
+                </div>
+
+                <div class="panel">
+                    <h2>Recent Activities</h2>
+                    <ul class="activities-list">
+                        {% for a in data.activities %}
+                        <li class="activity-item">
+                            <div class="activity-date">{{ a.date }}</div>
+                            <div class="activity-text">{{ a.text }}</div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="panel">
+            <p>No data collected yet. Click "Update Now" to run the collector.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Skill History Modal -->
+    <div class="modal-overlay" id="skillModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalSkillTitle">Skill History</h2>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <canvas id="skillChart" height="100"></canvas>
+            <div id="skillNoGainsMessage" style="display:none; color: var(--text-muted); margin-top: 12px;">
+                No gains in the selected range yet.
+            </div>
+            <div class="chart-controls">
+                <button class="tf-btn active" data-period="day">1 day</button>
+                <button class="tf-btn" data-period="week">1 week</button>
+                <button class="tf-btn" data-period="month">1 month</button>
+                <button class="tf-btn" data-period="year">1 year</button>
+                <button class="tf-btn" data-period="all">all</button>
+            </div>
+        </div>
     </div>
 
     <script>
-        // Skill row click: toggle chart
-        document.querySelectorAll('.skill-row').forEach(row => {
-            row.addEventListener('click', async () => {
-                const nextRow = row.nextElementSibling;
-                const canvas = nextRow.querySelector('canvas');
-                const skill = row.dataset.skill;
+        // Format Local Time
+        const lu = document.getElementById('lastUpdated');
+        if (lu && lu.textContent !== 'Never') {
+            lu.textContent = new Date(lu.textContent).toLocaleString();
+        }
 
-                if (nextRow.style.display === 'none') {
-                    nextRow.style.display = '';
-                    const data = await fetch(`/skill_history/${skill}?timeframe=all`).then(r => r.json());
-                    const labels = data.map(d => d.timestamp);
-                    const xp = data.map(d => d.xp);
-                    if (canvas.chart) canvas.chart.destroy();
-                    canvas.chart = new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: skill + ' XP', data: xp, borderWidth: 2 }] } });
-                } else {
-                    nextRow.style.display = 'none';
+        // Manual Update Button
+        document.getElementById('updateBtn').addEventListener('click', async (e) => {
+            e.target.disabled = true; e.target.textContent = 'Updating...';
+            await fetch('/api/update', { method: 'POST' });
+            location.reload();
+        });
+
+        {% if data %}
+        // Static total XP chart (30 days)
+        new Chart(document.getElementById('totalXpChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: {{ data.timestamps | tojson }},
+            datasets: [{
+                label: 'Total XP', data: {{ data.xp_history | tojson }},
+            borderColor: '#38bdf8', backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            borderWidth: 2, fill: true, tension: 0.4, pointRadius: 0
+                }]
+            },
+            options: {
+            responsive: true, plugins: { legend: { display: false } },
+            scales: {
+                x: { type: 'time', time: { tooltipFormat: 'll HH:mm' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                y: { ticks: { color: '#94a3b8', callback: val => val.toLocaleString() }, grid: { color: '#334155' } }
+            }
+        }
+        });
+
+        // Skill modal chart
+        const modal = document.getElementById('skillModal');
+        const noGains = document.getElementById('skillNoGainsMessage');
+        let currentSkill = '';
+        let skillChartInstance = null;
+
+        document.querySelectorAll('.skill-card').forEach(card => {
+            card.addEventListener('click', () => {
+                currentSkill = card.dataset.skill;
+                document.getElementById('modalSkillTitle').textContent = `${currentSkill} History`;
+                modal.classList.add('active');
+
+                document.querySelectorAll('#skillModal .chart-controls .tf-btn').forEach(b => b.classList.remove('active'));
+                document.querySelector('#skillModal .chart-controls .tf-btn[data-period="day"]').classList.add('active');
+                loadSkillData(currentSkill, 'day');
+            });
+        });
+
+        document.getElementById('closeModal').addEventListener('click', () => modal.classList.remove('active'));
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+
+        document.querySelectorAll('#skillModal .chart-controls .tf-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('#skillModal .chart-controls .tf-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                loadSkillData(currentSkill, e.target.dataset.period);
+            });
+        });
+
+        async function loadSkillData(skill, period) {
+            const res = await fetch(`/api/chart/${encodeURIComponent(skill)}/${period}`);
+            const chartData = await res.json();
+
+            if (skillChartInstance) {
+                skillChartInstance.destroy();
+                skillChartInstance = null;
+            }
+
+            if (!chartData.has_gains) {
+                noGains.style.display = 'block';
+                return;
+            }
+
+            noGains.style.display = 'none';
+            const timeUnit = period === 'day' ? 'hour' : 'day';
+            const tooltipFormat = period === 'day' ? 'll HH:mm' : 'll';
+            const pointRadius = chartData.labels.length > 180 ? 0 : (chartData.labels.length > 60 ? 1.5 : 3);
+
+            skillChartInstance = new Chart(document.getElementById('skillChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [{
+                        label: `${skill} XP`,
+                        data: chartData.totals,
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: pointRadius
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: timeUnit,
+                                tooltipFormat: tooltipFormat,
+                                displayFormats: {
+                                    hour: 'HH:mm',
+                                    day: 'MMM D'
+                                }
+                            },
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#334155' }
+                        },
+                        y: { ticks: { color: '#94a3b8', callback: val => val.toLocaleString() }, grid: { color: '#334155' } }
+                    }
                 }
             });
-        });
-
-        // Timeframe buttons
-        document.querySelectorAll('.tf-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const tr = e.target.closest('tr').previousElementSibling;
-                const skill = tr.dataset.skill;
-                const canvas = tr.nextElementSibling.querySelector('canvas');
-                const timeframe = e.target.dataset.timeframe;
-
-                const data = await fetch(`/skill_history/${skill}?timeframe=${timeframe}`).then(r => r.json());
-                const labels = data.map(d => d.timestamp);
-                const xp = data.map(d => d.xp);
-                if (canvas.chart) canvas.chart.destroy();
-                canvas.chart = new Chart(canvas.getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: skill + ' XP', data: xp, borderWidth: 2 }] } });
-            });
-        });
+        }
+        {% endif %}
     </script>
 </body>
 

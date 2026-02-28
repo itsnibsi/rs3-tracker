@@ -1,121 +1,49 @@
 import asyncio
-import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from collector import collect_snapshot
 from db import get_conn, init_db
+from utils import calculate_progress
 
 templates = Jinja2Templates(directory="templates")
 
-
-def get_latest_snapshot():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1")
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-
-def get_total_stats():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1")
-    latest = cur.fetchone()
-    conn.close()
-    if not latest:
-        return {}
-    return {
-        "total_xp": latest["total_xp"],
-        "total_level": latest["total_level"],
-        "combat_level": latest["combat_level"],
-        "overall_rank": latest["overall_rank"],
-        "quest_points": latest["quest_points"],
-    }
-
-
-def get_biggest_gain(period_hours=24):
-    conn = get_conn()
-    cur = conn.cursor()
-    end = datetime.utcnow()
-    start = end - timedelta(hours=period_hours)
-    cur.execute(
-        """
-        SELECT s.timestamp, s.total_xp
-        FROM snapshots s
-        WHERE s.timestamp BETWEEN ? AND ?
-        ORDER BY s.timestamp ASC
-    """,
-        (start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    rows = cur.fetchall()
-    conn.close()
-    if len(rows) < 2:
-        return 0
-    return rows[-1]["total_xp"] - rows[0]["total_xp"]
-
-
-def get_xp_streak():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT timestamp, total_xp FROM snapshots ORDER BY timestamp ASC")
-    rows = cur.fetchall()
-    conn.close()
-    if not rows:
-        return 0
-    streak = 0
-    prev_xp = None
-    for r in reversed(rows):
-        if prev_xp is None:
-            prev_xp = r["total_xp"]
-            streak += 1
-        else:
-            if r["total_xp"] < prev_xp:
-                break
-            streak += 1
-            prev_xp = r["total_xp"]
-    return streak
-
-
-def get_previous_snapshot(hours=24):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Compute cutoff
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
-    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
-
-    # Snapshots before cutoff
-    cur.execute(
-        """
-        SELECT * FROM snapshots
-        WHERE timestamp <= ?
-        ORDER BY timestamp DESC
-        LIMIT 1
-    """,
-        (cutoff_str,),
-    )
-    snapshot = cur.fetchone()
-
-    if snapshot:
-        conn.close()
-        return snapshot
-
-    # fallback: earliest snapshot
-    cur.execute("""
-        SELECT * FROM snapshots
-        ORDER BY timestamp ASC
-        LIMIT 1
-    """)
-    snapshot = cur.fetchone()
-    conn.close()
-    return snapshot
+RS3_ORDER = [
+    "Attack",
+    "Constitution",
+    "Mining",
+    "Strength",
+    "Agility",
+    "Smithing",
+    "Defence",
+    "Herblore",
+    "Fishing",
+    "Ranged",
+    "Thieving",
+    "Cooking",
+    "Prayer",
+    "Crafting",
+    "Firemaking",
+    "Magic",
+    "Fletching",
+    "Woodcutting",
+    "Runecrafting",
+    "Slayer",
+    "Farming",
+    "Construction",
+    "Hunter",
+    "Summoning",
+    "Dungeoneering",
+    "Divination",
+    "Invention",
+    "Archaeology",
+    "Necromancy",
+]
 
 
 @asynccontextmanager
@@ -125,230 +53,571 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, title="RS3 Tracker")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+def scale_xp(value):
+    return (value or 0) / 10
+
+
+def format_xp(value):
+    scaled = scale_xp(value)
+    return f"{scaled:,.1f}".rstrip("0").rstrip(".")
+
+
+def parse_snapshot_ts(ts):
+    return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+def normalize_bucket(timeframe):
+    buckets = {
+        "hour": "hour",
+        "day": "day",
+        "week": "week",
+        "month": "month",
+        "all": "day",
+    }
+    return buckets.get(timeframe, "day")
+
+
+def normalize_period(period):
+    mapping = {
+        "day": "day",
+        "week": "week",
+        "month": "month",
+        "year": "year",
+        "all": "all",
+    }
+    return mapping.get(period, "day")
+
+
+def advance_bucket(dt, bucket):
+    if bucket == "hour":
+        return dt + timedelta(hours=1)
+    if bucket == "day":
+        return dt + timedelta(days=1)
+    if bucket == "week":
+        return dt + timedelta(weeks=1)
+    if bucket == "month":
+        if dt.month == 12:
+            return dt.replace(year=dt.year + 1, month=1, day=1)
+        return dt.replace(month=dt.month + 1, day=1)
+    if bucket == "year":
+        return dt.replace(year=dt.year + 1, month=1, day=1)
+    return dt + timedelta(days=1)
+
+
+def build_bucket_starts(start, end, bucket):
+    starts = []
+    current = start
+    while current <= end:
+        starts.append(current)
+        current = advance_bucket(current, bucket)
+    return starts
+
+
+def get_period_window(period, now, earliest_ts=None):
+    p = normalize_period(period)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if p == "day":
+        end = now.replace(minute=0, second=0, microsecond=0)
+        start = end - timedelta(hours=23)
+        return start, end, "hour"
+
+    if p == "week":
+        end = today
+        start = end - timedelta(days=6)
+        return start, end, "day"
+
+    if p == "month":
+        end = today
+        start = today.replace(day=1)
+        return start, end, "day"
+
+    if p == "year":
+        end = today
+        start = end - timedelta(days=364)
+        return start, end, "day"
+
+    # all history daily
+    end = today
+    if earliest_ts:
+        earliest = parse_snapshot_ts(earliest_ts)
+        start = earliest.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start = end
+    return start, end, "day"
+
+
+def get_timeframe_window(timeframe, now, earliest_ts=None):
+    t = timeframe if timeframe in {"hour", "day", "week", "month", "all"} else "day"
+
+    if t == "hour":
+        end = now.replace(minute=0, second=0, microsecond=0)
+        start = end - timedelta(hours=23)
+        return start, end, "hour"
+
+    if t == "day":
+        end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = end.replace(day=1)
+        return start, end, "day"
+
+    if t == "week":
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = month_start
+        end = bucket_start(now, "week")
+        return start, end, "week"
+
+    if t == "month":
+        end = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = end.replace(month=1)
+        return start, end, "month"
+
+    # all: full history, daily buckets
+    end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if earliest_ts:
+        earliest = parse_snapshot_ts(earliest_ts)
+        start = earliest.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start = end
+    return start, end, "day"
+
+
+def aggregate_bucket_gains(rows, bucket, starts, value_key):
+    parsed = [
+        (parse_snapshot_ts(row["timestamp"]), row[value_key])
+        for row in rows
+        if row["timestamp"] is not None
+    ]
+    parsed.sort(key=lambda t: t[0])
+
+    if not starts:
+        return []
+
+    values = []
+    idx = 0
+    previous_close = None
+    first_start = starts[0]
+
+    while idx < len(parsed) and parsed[idx][0] < first_start:
+        previous_close = parsed[idx][1]
+        idx += 1
+
+    for b_start in starts:
+        b_end = advance_bucket(b_start, bucket)
+        bucket_close = previous_close
+        while idx < len(parsed) and parsed[idx][0] < b_end:
+            bucket_close = parsed[idx][1]
+            idx += 1
+
+        if bucket_close is None or previous_close is None:
+            gain_raw = 0
+        else:
+            gain_raw = max(0, bucket_close - previous_close)
+
+        values.append(scale_xp(gain_raw))
+        if bucket_close is not None:
+            previous_close = bucket_close
+
+    return values
+
+
+def aggregate_bucket_totals(rows, bucket, starts, value_key):
+    parsed = [
+        (parse_snapshot_ts(row["timestamp"]), row[value_key])
+        for row in rows
+        if row["timestamp"] is not None
+    ]
+    parsed.sort(key=lambda t: t[0])
+
+    if not starts:
+        return []
+
+    values = []
+    idx = 0
+    previous_close = None
+    first_start = starts[0]
+
+    while idx < len(parsed) and parsed[idx][0] < first_start:
+        previous_close = parsed[idx][1]
+        idx += 1
+
+    for b_start in starts:
+        b_end = advance_bucket(b_start, bucket)
+        bucket_close = previous_close
+        while idx < len(parsed) and parsed[idx][0] < b_end:
+            bucket_close = parsed[idx][1]
+            idx += 1
+
+        values.append(scale_xp(bucket_close or 0))
+        if bucket_close is not None:
+            previous_close = bucket_close
+
+    return values
+
+
+def aggregate_last_snapshot_totals(rows, bucket, starts, value_key):
+    parsed = [
+        (parse_snapshot_ts(row["timestamp"]), row[value_key])
+        for row in rows
+        if row["timestamp"] is not None
+    ]
+    parsed.sort(key=lambda t: t[0])
+
+    if not starts:
+        return []
+
+    values = []
+    idx = 0
+    previous_close = None
+    first_start = starts[0]
+    seen_data = False
+
+    while idx < len(parsed) and parsed[idx][0] < first_start:
+        previous_close = parsed[idx][1]
+        idx += 1
+
+    for b_start in starts:
+        b_end = advance_bucket(b_start, bucket)
+        bucket_close = previous_close
+        while idx < len(parsed) and parsed[idx][0] < b_end:
+            bucket_close = parsed[idx][1]
+            idx += 1
+
+        if bucket_close is None and not seen_data:
+            values.append(None)
+            continue
+
+        seen_data = True
+        values.append(scale_xp(bucket_close if bucket_close is not None else previous_close))
+        if bucket_close is not None:
+            previous_close = bucket_close
+
+    return values
+
+
+def bucket_start(dt, bucket):
+    if bucket == "hour":
+        return dt.replace(minute=0, second=0, microsecond=0)
+    if bucket == "day":
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    if bucket == "week":
+        day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        return day_start - timedelta(days=day_start.weekday())
+    if bucket == "month":
+        return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if bucket == "year":
+        return dt.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def format_bucket_label(dt, bucket):
+    if bucket == "hour":
+        return dt.strftime("%Y-%m-%d %H:%M:%S") + "Z"
+    return dt.strftime("%Y-%m-%d")
+
+
+def build_bucket_gains(rows, bucket, value_key):
+    bucket_closing_xp = {}
+
+    for row in rows:
+        ts = parse_snapshot_ts(row["timestamp"])
+        b = bucket_start(ts, bucket)
+        bucket_closing_xp[b] = row[value_key]
+
+    ordered = sorted(bucket_closing_xp.items(), key=lambda t: t[0])
+    points = []
+    prev_xp = None
+    for b, closing_xp in ordered:
+        gain_raw = 0 if prev_xp is None else max(0, closing_xp - prev_xp)
+        points.append(
+            {"timestamp": b.strftime("%Y-%m-%d %H:%M:%S") + "Z", "gain": scale_xp(gain_raw)}
+        )
+        prev_xp = closing_xp
+    return points
+
+
+def build_bucket_totals(rows, bucket, value_key):
+    bucket_closing_xp = {}
+
+    for row in rows:
+        ts = parse_snapshot_ts(row["timestamp"])
+        b = bucket_start(ts, bucket)
+        bucket_closing_xp[b] = row[value_key]
+
+    ordered = sorted(bucket_closing_xp.items(), key=lambda t: t[0])
+    return [
+        {"timestamp": b.strftime("%Y-%m-%d %H:%M:%S") + "Z", "total": scale_xp(closing_xp)}
+        for b, closing_xp in ordered
+    ]
+
+
+def get_window_baseline(cur, cutoff, latest):
+    # Prefer snapshot at/before cutoff; if missing, use earliest snapshot in the window.
+    cur.execute(
+        "SELECT * FROM snapshots WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1",
+        (cutoff,),
+    )
+    baseline = cur.fetchone()
+    if baseline:
+        return baseline
+
+    cur.execute(
+        "SELECT * FROM snapshots WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT 1",
+        (cutoff,),
+    )
+    return cur.fetchone() or latest
 
 
 async def background_loop():
     while True:
         try:
-            collect_snapshot()
+            await asyncio.to_thread(collect_snapshot)
         except Exception as e:
-            print("Collector error:", e)
-        await asyncio.sleep(3600 - (time.time() % 3600))
+            print(f"Collector error: {e}")
+        await asyncio.sleep(3600)
 
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT timestamp, total_xp FROM snapshots ORDER BY timestamp")
-    rows = cur.fetchall()
-    timestamps = [r["timestamp"] for r in rows]
-    xp = [r["total_xp"] for r in rows]
+def get_dashboard_data():
+    with get_conn() as conn:
+        cur = conn.cursor()
 
-    total_stats = get_total_stats()
-    xp_24h = get_biggest_gain(24)
-    xp_7d = get_biggest_gain(168)
-    streak_days = get_xp_streak()
+        cur.execute("SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1")
+        latest = cur.fetchone()
+        if not latest:
+            return None
 
-    # Fetch current skills with progress bars
-    latest = get_latest_snapshot()
-    prev = get_previous_snapshot(24)
-    skill_list = []
-    if latest:
+        cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        prev_24h = get_window_baseline(cur, cutoff_24h, latest)
+
+        cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        prev_7d = get_window_baseline(cur, cutoff_7d, latest)
+
+        # Calculate XP Streak in consecutive days
+        cur.execute("""
+            SELECT date(timestamp) as dt, MAX(total_xp) as max_xp
+            FROM snapshots GROUP BY dt ORDER BY dt DESC
+        """)
+        rows = cur.fetchall()
+        streak = 0
+        if len(rows) >= 2:
+            for i in range(len(rows) - 1):
+                if rows[i]["max_xp"] > rows[i + 1]["max_xp"]:
+                    streak += 1
+                else:
+                    break
+
+        # Skills & Progress
         cur.execute(
             "SELECT skill, level, xp, rank FROM skills WHERE snapshot_id = ?",
             (latest["id"],),
         )
         current_skills = cur.fetchall()
-        prev_map = {}
-        if prev:
+
+        prev_skills_map = {}
+        if prev_24h:
             cur.execute(
-                "SELECT skill, xp FROM skills WHERE snapshot_id = ?", (prev["id"],)
+                "SELECT skill, xp FROM skills WHERE snapshot_id = ?", (prev_24h["id"],)
             )
             for r in cur.fetchall():
-                prev_map[r["skill"]] = r["xp"]
+                prev_skills_map[r["skill"]] = r["xp"]
+
+        skills_data = []
         for s in current_skills:
-            gain = s["xp"] - prev_map.get(s["skill"], s["xp"])
-            # Simple XP to next level progress
-            # RS3 formula approximation: next_level_xp = 0.25 * level^3 + something...
-            next_level_xp = int((s["level"] + 1) ** 3 * 1000)  # simple approximation
-            progress = min(max((s["xp"] % next_level_xp) / next_level_xp, 0), 1)
-            skill_list.append(
+            gain = s["xp"] - prev_skills_map.get(s["skill"], s["xp"])
+            skills_data.append(
                 {
                     "skill": s["skill"],
                     "level": s["level"],
                     "xp": s["xp"],
-                    "rank": s["rank"],
                     "xp_gain": gain,
-                    "progress": progress,
+                    "xp_display": format_xp(s["xp"]),
+                    "xp_gain_display": format_xp(gain),
+                    "progress": calculate_progress(s["skill"], s["level"], s["xp"]),
                 }
             )
 
-    # Fetch latest activities
-    cur.execute("""
-        SELECT text, date FROM activities
-        ORDER BY id DESC
-        LIMIT 20
-    """)
-    activities = cur.fetchall()
-    conn.close()
+        # Sort by standard RS3 layout order
+        order_map = {name: i for i, name in enumerate(RS3_ORDER)}
+        skills_data.sort(key=lambda x: order_map.get(x["skill"], 999))
 
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "timestamps": timestamps,
-            "xp": xp,
-            "total_stats": total_stats,
-            "xp_24h": xp_24h,
-            "xp_7d": xp_7d,
-            "streak_days": streak_days,
-            "skills": skill_list,
-            "activities": activities,
-        },
-    )
+        cur.execute("SELECT text, date FROM activities ORDER BY id DESC LIMIT 20")
+        activities = cur.fetchall()
 
-
-@app.get("/skills", response_class=HTMLResponse)
-def skills(request: Request):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    latest = get_latest_snapshot()
-    prev = get_previous_snapshot(24)  # fixed delta
-
-    # Get current skills
-    cur.execute(
-        """
-        SELECT skill, level, xp, rank
-        FROM skills
-        WHERE snapshot_id = ?
-        ORDER BY level DESC
-    """,
-        (latest["id"],),
-    )
-    current_skills = cur.fetchall()
-
-    # Map previous XP
-    prev_xp_map = {}
-    if prev:
         cur.execute(
             """
-            SELECT skill, xp
-            FROM skills
-            WHERE snapshot_id = ?
+            SELECT timestamp, total_xp
+            FROM snapshots
+            WHERE timestamp >= datetime('now', '-30 days')
+            ORDER BY timestamp ASC
+        """
+        )
+        history = cur.fetchall()
+
+        latest_dict = dict(latest)
+        latest_dict["total_xp_display"] = format_xp(latest["total_xp"])
+
+        xp_24h = latest["total_xp"] - prev_24h["total_xp"]
+        xp_7d = latest["total_xp"] - prev_7d["total_xp"]
+
+        return {
+            "latest": latest_dict,
+            "xp_24h": xp_24h,
+            "xp_7d": xp_7d,
+            "xp_24h_display": format_xp(xp_24h),
+            "xp_7d_display": format_xp(xp_7d),
+            "streak_days": streak,
+            "skills": skills_data,
+            "activities": [dict(a) for a in activities],
+            "timestamps": [r["timestamp"] + "Z" for r in history],
+            "xp_history": [scale_xp(r["total_xp"]) for r in history],
+        }
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request):
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "data": get_dashboard_data()}
+    )
+
+
+@app.get("/api/skill_history/{skill_name}/{timeframe}")
+def api_skill_history(skill_name: str, timeframe: str = "all"):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT MIN(timestamp) as min_ts FROM snapshots")
+        min_ts_row = cur.fetchone()
+        min_ts = min_ts_row["min_ts"] if min_ts_row else None
+        now = datetime.now(timezone.utc)
+        start, end, bucket = get_timeframe_window(timeframe, now, min_ts)
+        starts = build_bucket_starts(start, end, bucket)
+
+        cur.execute(
+            """
+            SELECT s.timestamp, sk.xp FROM skills sk
+            JOIN snapshots s ON sk.snapshot_id = s.id
+            WHERE sk.skill = ? AND s.timestamp < ?
+            ORDER BY s.timestamp ASC
         """,
-            (prev["id"],),
-        )
-        for row in cur.fetchall():
-            prev_xp_map[row["skill"]] = row["xp"]
-
-    skill_data = []
-    for s in current_skills:
-        delta = s["xp"] - prev_xp_map.get(s["skill"], s["xp"])
-        skill_data.append(
-            {
-                "skill": s["skill"],
-                "level": s["level"],
-                "xp": s["xp"],
-                "rank": s["rank"],
-                "xp_gain": delta,
-            }
+            (skill_name, advance_bucket(end, bucket).strftime("%Y-%m-%d %H:%M:%S")),
         )
 
-    conn.close()
-    return templates.TemplateResponse(
-        "skills.html", {"request": request, "skills": skill_data}
-    )
+        rows = cur.fetchall()
+        totals = aggregate_bucket_totals(rows, bucket, starts, "xp")
+        labels = [format_bucket_label(b, bucket) for b in starts]
+        return [{"timestamp": ts, "total": v} for ts, v in zip(labels, totals)]
 
 
-@app.get("/skill_history/{skill_name}")
-def skill_history(skill_name: str, timeframe: str = "all"):
-    conn = get_conn()
-    cur = conn.cursor()
+@app.get("/api/skills_totals/{timeframe}")
+def api_skills_totals(timeframe: str = "day"):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT MIN(timestamp) as min_ts FROM snapshots")
+        min_ts_row = cur.fetchone()
+        min_ts = min_ts_row["min_ts"] if min_ts_row else None
+        now = datetime.now(timezone.utc)
+        start, end, bucket = get_timeframe_window(timeframe, now, min_ts)
+        starts = build_bucket_starts(start, end, bucket)
+        end_exclusive = advance_bucket(end, bucket).strftime("%Y-%m-%d %H:%M:%S")
 
-    # Determine start datetime based on timeframe
-    now = datetime.utcnow()
-    if timeframe == "hour":
-        start = now - timedelta(hours=1)
-    elif timeframe == "day":
-        start = now - timedelta(days=1)
-    elif timeframe == "week":
-        start = now - timedelta(weeks=1)
-    elif timeframe == "month":
-        start = now - timedelta(days=30)
-    elif timeframe == "year":
-        start = now - timedelta(days=365)
-    else:
-        start = datetime(1970, 1, 1)
-
-    cur.execute(
+        cur.execute(
+            """
+            SELECT s.timestamp, sk.skill, sk.xp
+            FROM skills sk
+            JOIN snapshots s ON sk.snapshot_id = s.id
+            WHERE s.timestamp < ?
+            ORDER BY s.timestamp ASC
         """
-        SELECT s.timestamp, sk.xp
-        FROM skills sk
-        JOIN snapshots s ON sk.snapshot_id = s.id
-        WHERE sk.skill = ? AND s.timestamp >= ?
-        ORDER BY s.timestamp ASC
-    """,
-        (skill_name, start.strftime("%Y-%m-%d %H:%M:%S")),
-    )
+            ,
+            (end_exclusive,),
+        )
+        rows = cur.fetchall()
 
-    data = [{"timestamp": row["timestamp"], "xp": row["xp"]} for row in cur.fetchall()]
-    conn.close()
-    return data
+        per_skill_rows = {}
+        for row in rows:
+            per_skill_rows.setdefault(row["skill"], []).append(row)
 
+        labels = [format_bucket_label(b, bucket) for b in starts]
+        order_map = {name: i for i, name in enumerate(RS3_ORDER)}
+        series = []
+        for skill in sorted(per_skill_rows.keys(), key=lambda x: order_map.get(x, 999)):
+            values = aggregate_bucket_totals(per_skill_rows[skill], bucket, starts, "xp")
+            series.append({"skill": skill, "totals": values})
 
-@app.get("/skill/{skill_name}", response_class=HTMLResponse)
-def skill_detail(request: Request, skill_name: str, timeframe: str = "all"):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Determine start datetime based on timeframe
-    now = datetime.utcnow()
-    if timeframe == "hour":
-        start = now - timedelta(hours=1)
-    elif timeframe == "day":
-        start = now - timedelta(days=1)
-    elif timeframe == "week":
-        start = now - timedelta(weeks=1)
-    elif timeframe == "month":
-        start = now - timedelta(days=30)
-    elif timeframe == "year":
-        start = now - timedelta(days=365)
-    else:
-        start = datetime(1970, 1, 1)
-
-    cur.execute(
-        """
-        SELECT s.timestamp, sk.xp
-        FROM skills sk
-        JOIN snapshots s ON sk.snapshot_id = s.id
-        WHERE sk.skill = ? AND s.timestamp >= ?
-        ORDER BY s.timestamp ASC
-    """,
-        (skill_name, start.strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    data = cur.fetchall()
-    conn.close()
-
-    return templates.TemplateResponse(
-        "skill_detail.html",
-        {"request": request, "skill": skill_name, "data": data, "timeframe": timeframe},
-    )
+        return {"labels": labels, "series": series}
 
 
-@app.get("/update")
+@app.get("/api/chart/{skill_name}/{period}")
+def api_chart(skill_name: str, period: str = "day"):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT MIN(timestamp) as min_ts FROM snapshots")
+        min_ts_row = cur.fetchone()
+        min_ts = min_ts_row["min_ts"] if min_ts_row else None
+
+        now = datetime.now(timezone.utc)
+        start, end, bucket = get_period_window(period, now, min_ts)
+        starts = build_bucket_starts(start, end, bucket)
+        end_exclusive = advance_bucket(end, bucket).strftime("%Y-%m-%d %H:%M:%S")
+
+        if skill_name.lower() == "total":
+            cur.execute(
+                """
+                SELECT timestamp, total_xp as xp
+                FROM snapshots
+                WHERE timestamp < ?
+                ORDER BY timestamp ASC
+            """,
+                (end_exclusive,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT s.timestamp, sk.xp as xp
+                FROM skills sk
+                JOIN snapshots s ON sk.snapshot_id = s.id
+                WHERE sk.skill = ? AND s.timestamp < ?
+                ORDER BY s.timestamp ASC
+            """,
+                (skill_name, end_exclusive),
+            )
+
+        rows = cur.fetchall()
+        totals = aggregate_last_snapshot_totals(rows, bucket, starts, "xp")
+        labels = [format_bucket_label(b, bucket) for b in starts]
+
+        # Keep the full window labels so the x-axis spans the selected period even if
+        # only some buckets contain data.
+        has_gains = any(v is not None for v in totals)
+
+        return {
+            "labels": labels,
+            "totals": totals,
+            "has_gains": has_gains,
+            "period": normalize_period(period),
+            "skill": "Total" if skill_name.lower() == "total" else skill_name,
+        }
+
+
+@app.get("/api/total_xp_gains/{timeframe}")
+def api_total_xp_gains(timeframe: str = "day"):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT timestamp, total_xp FROM snapshots ORDER BY timestamp ASC")
+        rows = cur.fetchall()
+        return build_bucket_gains(rows, normalize_bucket(timeframe), "total_xp")
+
+
+@app.post("/api/update")
 def manual_update():
     try:
         collect_snapshot()
         return {"status": "success"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("app:app", host="0.0.0.0", port=8080, reload=True)
+        raise HTTPException(status_code=500, detail=str(e))
