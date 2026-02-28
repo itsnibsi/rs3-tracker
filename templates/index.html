@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RS3 Tracker</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="container">
+    <h1>RS3 Tracker</h1>
+
+    <div class="stats">
+        <div>XP (24h): {{ xp_24h }}</div>
+        <div>XP (7d): {{ xp_7d }}</div>
+    </div>
+
+    <canvas id="xpChart"></canvas>
+
+    <a href="/skills">View Skills</a>
+</div>
+
+<script>
+new Chart(document.getElementById('xpChart'), {
+    type: 'line',
+    data: {
+        labels: {{ timestamps | safe }},
+        datasets: [{
+            label: 'Total XP',
+            data: {{ xp | safe }},
+            borderWidth: 2
+        }]
+    }
+});
+</script>
+</body>
+</html>
