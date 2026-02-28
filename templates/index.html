@@ -24,7 +24,10 @@
                     Last updated: <span id="lastUpdated">{{ data.latest.timestamp if data else 'Never' }}</span>
                 </div>
             </div>
-            <button id="updateBtn" class="tf-btn">Update Now</button>
+            <div style="display: flex; gap: 10px;">
+                <a href="/admin" class="tf-btn admin-link-btn">Admin</a>
+                <button id="updateBtn" class="tf-btn">Update Now</button>
+            </div>
         </header>
 
         {% if data %}

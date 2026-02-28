@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - RS3 Tracker</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Admin</h1>
+                <div style="color: var(--text-muted)">Protected maintenance interface</div>
+            </div>
+            <a href="/" class="tf-btn admin-link-btn">Back to Dashboard</a>
+        </header>
+
+        {% if message %}
+        <div class="panel admin-alert admin-alert-success">{{ message }}</div>
+        {% endif %}
+        {% if sql_error %}
+        <div class="panel admin-alert admin-alert-error">{{ sql_error }}</div>
+        {% endif %}
+
+        <div class="panel" style="margin-bottom: 20px;">
+            <h2>Database Overview</h2>
+            <div class="admin-overview-grid">
+                <div class="summary-cell">
+                    <div class="summary-label">DB Path</div>
+                    <div class="summary-value admin-mono">{{ overview.db_path }}</div>
+                </div>
+                <div class="summary-cell">
+                    <div class="summary-label">DB Size</div>
+                    <div class="summary-value">{{ overview.db_size_mb }} MB</div>
+                </div>
+                <div class="summary-cell">
+                    <div class="summary-label">Latest Snapshot</div>
+                    <div class="summary-value">{{ overview.latest_snapshot_ts or "No data yet" }}</div>
+                </div>
+            </div>
+            <table class="admin-table" style="margin-top: 14px;">
+                <thead>
+                    <tr>
+                        <th>Table</th>
+                        <th>Rows</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in overview.table_counts %}
+                    <tr>
+                        <td>{{ t.name }}</td>
+                        <td>{{ "{:,}".format(t.count) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="panel" style="margin-bottom: 20px;">
+            <h2>Maintenance</h2>
+            <div class="admin-actions">
+                <form method="post" action="/admin/maintenance/update">
+                    <button type="submit" class="tf-btn">Collect Snapshot Now</button>
+                </form>
+                <form method="post" action="/admin/maintenance/checkpoint">
+                    <button type="submit" class="tf-btn">Run WAL Checkpoint</button>
+                </form>
+                <form method="post" action="/admin/maintenance/vacuum">
+                    <button type="submit" class="tf-btn">Run VACUUM</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>SQL Console</h2>
+            <div class="summary-label" style="margin-bottom: 10px;">
+                Executes one SQL statement at a time. Query results are capped to 200 rows.
+            </div>
+            <form method="post" action="/admin/sql">
+                <textarea class="admin-sql-input" name="sql" placeholder="SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 10;">{{ sql }}</textarea>
+                <div style="margin-top: 10px;">
+                    <button type="submit" class="tf-btn">Run SQL</button>
+                </div>
+            </form>
+            {% if sql_rowcount is not none %}
+            <div class="summary-label" style="margin-top: 12px;">Rows affected: {{ sql_rowcount }}</div>
+            {% endif %}
+            {% if sql_columns and sql_rows %}
+            <div class="admin-results-wrap">
+                <table class="admin-table" style="margin-top: 16px;">
+                    <thead>
+                        <tr>
+                            {% for col in sql_columns %}
+                            <th>{{ col }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in sql_rows %}
+                        <tr>
+                            {% for col in sql_columns %}
+                            <td>{{ row[col] }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+
+</html>

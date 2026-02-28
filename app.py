@@ -1,14 +1,19 @@
 import asyncio
+import os
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from secrets import compare_digest
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from collector import collect_snapshot
-from db import get_conn, init_db
+from db import DB_PATH, get_conn, init_db
 from utils import calculate_progress, xp_to_next_level
 
 templates = Jinja2Templates(directory="templates")
@@ -87,6 +92,73 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="RS3 Tracker")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+admin_security = HTTPBasic()
+
+
+def require_admin(credentials: Annotated[HTTPBasicCredentials, Depends(admin_security)]):
+    admin_user = os.getenv("ADMIN_USERNAME")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if not admin_user or not admin_password:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin credentials are not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD.",
+        )
+
+    user_ok = compare_digest(credentials.username, admin_user)
+    pass_ok = compare_digest(credentials.password, admin_password)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid admin credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials
+
+
+def get_admin_overview():
+    table_counts = []
+    with get_conn() as conn:
+        cur = conn.cursor()
+        for table in ("players", "snapshots", "skills", "activities"):
+            cur.execute(f"SELECT COUNT(*) AS count FROM {table}")
+            count_row = cur.fetchone()
+            table_counts.append({"name": table, "count": count_row["count"]})
+
+        cur.execute("SELECT timestamp FROM snapshots ORDER BY timestamp DESC LIMIT 1")
+        latest_row = cur.fetchone()
+
+    db_size_bytes = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    return {
+        "db_path": str(DB_PATH),
+        "db_size_bytes": db_size_bytes,
+        "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
+        "latest_snapshot_ts": latest_row["timestamp"] if latest_row else None,
+        "table_counts": table_counts,
+    }
+
+
+def render_admin_page(
+    request: Request,
+    sql: str = "",
+    sql_error: str | None = None,
+    sql_columns=None,
+    sql_rows=None,
+    sql_rowcount: int | None = None,
+    message: str | None = None,
+):
+    return templates.TemplateResponse(
+        "admin.html",
+        {
+            "request": request,
+            "overview": get_admin_overview(),
+            "sql": sql,
+            "sql_error": sql_error,
+            "sql_columns": sql_columns or [],
+            "sql_rows": sql_rows or [],
+            "sql_rowcount": sql_rowcount,
+            "message": message,
+        },
+    )
 
 
 def scale_skill_xp(value):
@@ -722,3 +794,95 @@ def manual_update():
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(
+    request: Request,
+    _: Annotated[HTTPBasicCredentials, Depends(require_admin)],
+):
+    return render_admin_page(request)
+
+
+@app.post("/admin/sql", response_class=HTMLResponse)
+def admin_run_sql(
+    request: Request,
+    _: Annotated[HTTPBasicCredentials, Depends(require_admin)],
+    sql: str = Form(...),
+):
+    statement = sql.strip()
+    if not statement:
+        return render_admin_page(request, sql=sql, sql_error="SQL query is required.")
+
+    # sqlite3.execute only allows one statement; this avoids accidental multi-step scripts.
+    statement_no_trailing = statement[:-1].strip() if statement.endswith(";") else statement
+    if ";" in statement_no_trailing:
+        return render_admin_page(
+            request,
+            sql=sql,
+            sql_error="Only one SQL statement is allowed per execution.",
+        )
+
+    try:
+        with get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(statement)
+            keyword = statement.split(maxsplit=1)[0].lower() if statement.split() else ""
+            if keyword in {"select", "pragma", "with"}:
+                rows = cur.fetchmany(200)
+                columns = [d[0] for d in (cur.description or [])]
+                return render_admin_page(
+                    request,
+                    sql=sql,
+                    sql_columns=columns,
+                    sql_rows=[dict(row) for row in rows],
+                    message=f"Query succeeded. Showing up to 200 rows ({len(rows)} returned).",
+                )
+
+            conn.commit()
+            return render_admin_page(
+                request,
+                sql=sql,
+                sql_rowcount=cur.rowcount,
+                message=f"Statement succeeded. Rows affected: {cur.rowcount}.",
+            )
+    except sqlite3.Error as exc:
+        return render_admin_page(request, sql=sql, sql_error=str(exc))
+
+
+@app.post("/admin/maintenance/update", response_class=HTMLResponse)
+def admin_collect_now(
+    request: Request,
+    _: Annotated[HTTPBasicCredentials, Depends(require_admin)],
+):
+    try:
+        collect_snapshot()
+        return render_admin_page(request, message="Snapshot collected successfully.")
+    except Exception as exc:
+        return render_admin_page(request, sql_error=f"Snapshot collection failed: {exc}")
+
+
+@app.post("/admin/maintenance/vacuum", response_class=HTMLResponse)
+def admin_vacuum(
+    request: Request,
+    _: Annotated[HTTPBasicCredentials, Depends(require_admin)],
+):
+    try:
+        with get_conn() as conn:
+            conn.execute("VACUUM")
+        return render_admin_page(request, message="VACUUM completed.")
+    except sqlite3.Error as exc:
+        return render_admin_page(request, sql_error=f"VACUUM failed: {exc}")
+
+
+@app.post("/admin/maintenance/checkpoint", response_class=HTMLResponse)
+def admin_checkpoint(
+    request: Request,
+    _: Annotated[HTTPBasicCredentials, Depends(require_admin)],
+):
+    try:
+        with get_conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+        return render_admin_page(request, message="WAL checkpoint completed.")
+    except sqlite3.Error as exc:
+        return render_admin_page(request, sql_error=f"WAL checkpoint failed: {exc}")

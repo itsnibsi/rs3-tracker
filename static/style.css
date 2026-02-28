@@ -382,6 +382,82 @@ h2 {
     color: var(--text-main);
 }
 
+.admin-link-btn {
+    text-decoration: none;
+}
+
+.admin-alert {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+}
+
+.admin-alert-success {
+    border-color: rgba(117, 188, 122, 0.55);
+    color: var(--success);
+}
+
+.admin-alert-error {
+    border-color: rgba(176, 77, 63, 0.65);
+    color: #dc8f81;
+}
+
+.admin-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.admin-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.admin-sql-input {
+    width: 100%;
+    min-height: 180px;
+    resize: vertical;
+    box-sizing: border-box;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    border-radius: 8px;
+    padding: 12px;
+    font: 0.9rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+    border: 1px solid var(--border);
+    text-align: left;
+    padding: 8px;
+    vertical-align: top;
+    font-size: 0.85rem;
+}
+
+.admin-table th {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.74rem;
+}
+
+.admin-results-wrap {
+    overflow-x: auto;
+}
+
+.admin-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    word-break: break-all;
+}
+
 @media (max-width: 760px) {
     .skills-heading {
         flex-direction: column;
@@ -392,5 +468,9 @@ h2 {
     .activity-item {
         grid-template-columns: 1fr;
         gap: 2px;
+    }
+
+    .admin-overview-grid {
+        grid-template-columns: 1fr;
     }
 }
