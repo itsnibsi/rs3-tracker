@@ -15,15 +15,18 @@ from fastapi.templating import Jinja2Templates
 from collector import collect_snapshot
 from config import ADMIN_PASSWORD, ADMIN_USERNAME, DB_PATH
 from db import get_conn, init_db
+from log import configure_logging, get_logger
 from skills import ACTIVITY_TYPE_META, RS3_ORDER, SKILL_COLORS
 from utils import calculate_progress, xp_to_next_level
 
+logger = get_logger(__name__)
 templates = Jinja2Templates(directory="templates")
 admin_security = HTTPBasic()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     init_db()
     asyncio.create_task(background_loop())
     yield
@@ -489,8 +492,8 @@ async def background_loop():
     while True:
         try:
             await asyncio.to_thread(collect_snapshot)
-        except Exception as e:
-            print(f"Collector error: {e}")
+        except Exception:
+            logger.exception("Collector error in background loop")
         await asyncio.sleep(3600)
 
 

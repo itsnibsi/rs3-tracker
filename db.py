@@ -3,6 +3,9 @@ import sqlite3
 from collections.abc import Callable
 
 from config import DATA_DIR, DB_PATH  # noqa: F401 — re-exported for legacy imports
+from log import get_logger
+
+logger = get_logger(__name__)
 
 MigrationFn = Callable[[sqlite3.Connection], None]
 
@@ -85,8 +88,10 @@ def run_migrations(conn: sqlite3.Connection):
     for version, migration in MIGRATIONS:
         if _is_migration_applied(conn, version):
             continue
+        logger.info("Applying migration: %s", version)
         migration(conn)
         _mark_migration_applied(conn, version)
+        logger.info("Migration applied: %s", version)
 
 
 def _create_base_tables(conn: sqlite3.Connection):
@@ -172,10 +177,13 @@ def _parse_args():
 
 
 if __name__ == "__main__":
+    from log import configure_logging
+
+    configure_logging()
     args = _parse_args()
     if args.command == "migrate":
         migrate_db()
-        print(f"Migrations completed for {DB_PATH}")
+        logger.info("Migrations completed for %s", DB_PATH)
     else:
         init_db()
-        print(f"Database initialized at {DB_PATH}")
+        logger.info("Database initialized at %s", DB_PATH)

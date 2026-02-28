@@ -6,7 +6,10 @@ import requests
 
 from config import RS3_USERNAME
 from db import get_conn, init_db
+from log import get_logger
 from skills import SKILL_NAMES
+
+logger = get_logger(__name__)
 
 USERNAME = RS3_USERNAME
 API_URL = f"https://apps.runescape.com/runemetrics/profile/profile?user={USERNAME}&activities=20"
@@ -44,12 +47,15 @@ def collect_snapshot():
         r = requests.get(API_URL, timeout=15)
         r.raise_for_status()
         data = r.json()
-    except Exception as e:
-        print(f"Failed to fetch data: {e}")
+    except requests.RequestException as e:
+        logger.error("Failed to fetch RuneMetrics data: %s", e)
         return
 
     if "error" in data or "skillvalues" not in data:
-        print("Invalid response or profile is private.")
+        logger.warning(
+            "Invalid RuneMetrics response for user %s — profile may be private",
+            USERNAME,
+        )
         return
 
     with get_conn() as conn:
@@ -131,8 +137,11 @@ def collect_snapshot():
                 pass  # Duplicate activity, ignore
 
         conn.commit()
-    print(
-        f"Collected snapshot for {USERNAME} at {datetime.now(timezone.utc).isoformat()} - Total XP: {total_xp}"
+
+    logger.info(
+        "Snapshot collected for %s — total XP: %s",
+        USERNAME,
+        total_xp,
     )
 
 

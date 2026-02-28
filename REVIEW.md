@@ -197,10 +197,10 @@ A: Break related items into clear chunks, give me the plan per chunk and then ex
 
 Current work task list, in order (finished chunks marked with **FINISHED**):
 
-**Chunk A — Constants & config consolidation** *(items 4, 5)* **FINISHED**
+ **FINISHED** **Chunk A — Constants & config consolidation** *(items 4, 5)*
 Extract `config.py` for all env/config parsing, and create one canonical skill metadata module (names, order, colors, icon keys, cap rules). Zero logic change — just moving things to the right home before the module split touches them. Do this first so the split has clean imports to work with.
 
-**Chunk B — Structured logging** *(item 9)*
+ **FINISHED** **Chunk B — Structured logging** *(item 9)*
 Replace all `print()` calls with `logging` (structured, leveled). Isolated change, no behavior impact, makes every subsequent chunk easier to debug.
 
 **Chunk C — Security hardening** *(item 12)*
