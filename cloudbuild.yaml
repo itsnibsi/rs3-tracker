@@ -24,7 +24,7 @@ steps:
 
         deploy_args=(
           run deploy "${_SERVICE}"
-          --image "${IMAGE_URI}"
+          --image "$${IMAGE_URI}"
           --region "${_REGION}"
           --platform managed
           --allow-unauthenticated
@@ -40,7 +40,7 @@ steps:
           echo "Deploying without Secret Manager substitutions."
         fi
 
-        gcloud "${deploy_args[@]}"
+        gcloud "$${deploy_args[@]}"
 
 substitutions:
   _REGION: europe-north1
