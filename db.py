@@ -1,12 +1,9 @@
 import argparse
-import os
 import sqlite3
 from collections.abc import Callable
-from pathlib import Path
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "tracker.db"
+from config import DATA_DIR, DB_PATH  # noqa: F401 — re-exported for legacy imports
+
 MigrationFn = Callable[[sqlite3.Connection], None]
 
 
@@ -136,7 +133,9 @@ def _create_base_tables(conn: sqlite3.Connection):
 
 
 def _create_indexes(conn: sqlite3.Connection):
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skills_snapshot_skill ON skills(snapshot_id, skill)"
     )
@@ -159,7 +158,9 @@ def migrate_db():
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="Database initializer and migration runner")
+    parser = argparse.ArgumentParser(
+        description="Database initializer and migration runner"
+    )
     parser.add_argument(
         "command",
         choices=("init", "migrate"),

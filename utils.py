@@ -1,13 +1,6 @@
+from skills import EXTENDED_120_SKILLS
+
 XP_PRECISION = 10
-EXTENDED_120_SKILLS = [
-    "Dungeoneering",
-    "Invention",
-    "Archaeology",
-    "Farming",
-    "Herblore",
-    "Slayer",
-    "Necromancy",
-]
 
 # Optional exact cumulative XP table for Invention.
 # Index by level (e.g. index 0 => level 1 cumulative XP, index 119 => level 120).

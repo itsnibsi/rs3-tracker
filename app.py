@@ -1,5 +1,4 @@
 import asyncio
-import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
@@ -14,85 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from collector import collect_snapshot
-from db import DB_PATH, get_conn, init_db
+from config import ADMIN_PASSWORD, ADMIN_USERNAME, DB_PATH
+from db import get_conn, init_db
+from skills import ACTIVITY_TYPE_META, RS3_ORDER, SKILL_COLORS
 from utils import calculate_progress, xp_to_next_level
 
 templates = Jinja2Templates(directory="templates")
-
-RS3_ORDER = [
-    "Attack",
-    "Constitution",
-    "Mining",
-    "Strength",
-    "Agility",
-    "Smithing",
-    "Defence",
-    "Herblore",
-    "Fishing",
-    "Ranged",
-    "Thieving",
-    "Cooking",
-    "Prayer",
-    "Crafting",
-    "Firemaking",
-    "Magic",
-    "Fletching",
-    "Woodcutting",
-    "Runecrafting",
-    "Slayer",
-    "Farming",
-    "Construction",
-    "Hunter",
-    "Summoning",
-    "Dungeoneering",
-    "Divination",
-    "Invention",
-    "Archaeology",
-    "Necromancy",
-]
-
-SKILL_COLORS = {
-    "Attack": "#b04d3f",
-    "Constitution": "#a43f52",
-    "Mining": "#7a6f63",
-    "Strength": "#b85d3d",
-    "Agility": "#5c8b6d",
-    "Smithing": "#7c7063",
-    "Defence": "#7f8b97",
-    "Herblore": "#4f7f4f",
-    "Fishing": "#4f758f",
-    "Ranged": "#6b7f52",
-    "Thieving": "#6c5a48",
-    "Cooking": "#a36a3a",
-    "Prayer": "#b9ae8d",
-    "Crafting": "#9f7b60",
-    "Firemaking": "#b85a32",
-    "Magic": "#5e6fb0",
-    "Fletching": "#7b6c54",
-    "Woodcutting": "#5f7a4f",
-    "Runecrafting": "#6e5d9b",
-    "Slayer": "#8b4a4a",
-    "Farming": "#64834c",
-    "Construction": "#8a6b4f",
-    "Hunter": "#7a6f54",
-    "Summoning": "#8c4f7f",
-    "Dungeoneering": "#5e5f67",
-    "Divination": "#4e7f89",
-    "Invention": "#88724f",
-    "Archaeology": "#927154",
-    "Necromancy": "#6f5b8f",
-}
-
-ACTIVITY_TYPE_META = {
-    "quest": {"label": "Quest", "color": "#9ecb67"},
-    "clue": {"label": "Clue", "color": "#a48ad8"},
-    "level": {"label": "Level Up", "color": "#69a8ff"},
-    "kill": {"label": "Kill", "color": "#d78070"},
-    "loot": {"label": "Loot", "color": "#d1b366"},
-    "achievement": {"label": "Achievement", "color": "#95b999"},
-    "unlock": {"label": "Unlock", "color": "#6ec2bb"},
-    "activity": {"label": "Activity", "color": "#8da0b6"},
-}
+admin_security = HTTPBasic()
 
 
 @asynccontextmanager
@@ -104,22 +31,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="RS3 Tracker")
 app.mount("/static", StaticFiles(directory="static"), name="static")
-admin_security = HTTPBasic()
 
 
 def require_admin(
     credentials: Annotated[HTTPBasicCredentials, Depends(admin_security)],
 ):
-    admin_user = os.getenv("ADMIN_USERNAME")
-    admin_password = os.getenv("ADMIN_PASSWORD")
-    if not admin_user or not admin_password:
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
         raise HTTPException(
             status_code=503,
             detail="Admin credentials are not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD.",
         )
 
-    user_ok = compare_digest(credentials.username, admin_user)
-    pass_ok = compare_digest(credentials.password, admin_password)
+    user_ok = compare_digest(credentials.username, ADMIN_USERNAME)
+    pass_ok = compare_digest(credentials.password, ADMIN_PASSWORD)
     if not (user_ok and pass_ok):
         raise HTTPException(
             status_code=401,
@@ -873,8 +797,6 @@ def api_chart(skill_name: str, period: str = "day"):
         totals = aggregate_last_snapshot_totals(rows, bucket, starts, "xp", scale_fn)
         labels = [format_bucket_label(b, bucket) for b in starts]
 
-        # Keep the full window labels so the x-axis spans the selected period even if
-        # only some buckets contain data.
         has_gains = series_has_data(totals)
 
         return {
@@ -922,7 +844,6 @@ def admin_run_sql(
     if not statement:
         return render_admin_page(request, sql=sql, sql_error="SQL query is required.")
 
-    # sqlite3.execute only allows one statement; this avoids accidental multi-step scripts.
     statement_no_trailing = (
         statement[:-1].strip() if statement.endswith(";") else statement
     )

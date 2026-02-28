@@ -1,0 +1,126 @@
+# ---------------------------------------------------------------------------
+# Canonical skill and activity taxonomy metadata for RS3.
+# All other modules should import from here — never redeclare these constants.
+# ---------------------------------------------------------------------------
+
+# Maps RuneMetrics skill ID -> skill name.
+SKILL_NAMES: dict[int, str] = {
+    0: "Attack",
+    1: "Defence",
+    2: "Strength",
+    3: "Constitution",
+    4: "Ranged",
+    5: "Prayer",
+    6: "Magic",
+    7: "Cooking",
+    8: "Woodcutting",
+    9: "Fletching",
+    10: "Fishing",
+    11: "Firemaking",
+    12: "Crafting",
+    13: "Smithing",
+    14: "Mining",
+    15: "Herblore",
+    16: "Agility",
+    17: "Thieving",
+    18: "Slayer",
+    19: "Farming",
+    20: "Runecrafting",
+    21: "Hunter",
+    22: "Construction",
+    23: "Summoning",
+    24: "Dungeoneering",
+    25: "Divination",
+    26: "Invention",
+    27: "Archaeology",
+    28: "Necromancy",
+}
+
+# Display order matching the in-game skills interface.
+RS3_ORDER: list[str] = [
+    "Attack",
+    "Constitution",
+    "Mining",
+    "Strength",
+    "Agility",
+    "Smithing",
+    "Defence",
+    "Herblore",
+    "Fishing",
+    "Ranged",
+    "Thieving",
+    "Cooking",
+    "Prayer",
+    "Crafting",
+    "Firemaking",
+    "Magic",
+    "Fletching",
+    "Woodcutting",
+    "Runecrafting",
+    "Slayer",
+    "Farming",
+    "Construction",
+    "Hunter",
+    "Summoning",
+    "Dungeoneering",
+    "Divination",
+    "Invention",
+    "Archaeology",
+    "Necromancy",
+]
+
+# Skills whose level cap is 120 rather than 99.
+EXTENDED_120_SKILLS: list[str] = [
+    "Dungeoneering",
+    "Invention",
+    "Archaeology",
+    "Farming",
+    "Herblore",
+    "Slayer",
+    "Necromancy",
+]
+
+# Per-skill accent colours used in charts and cards.
+SKILL_COLORS: dict[str, str] = {
+    "Attack": "#b04d3f",
+    "Constitution": "#a43f52",
+    "Mining": "#7a6f63",
+    "Strength": "#b85d3d",
+    "Agility": "#5c8b6d",
+    "Smithing": "#7c7063",
+    "Defence": "#7f8b97",
+    "Herblore": "#4f7f4f",
+    "Fishing": "#4f758f",
+    "Ranged": "#6b7f52",
+    "Thieving": "#6c5a48",
+    "Cooking": "#a36a3a",
+    "Prayer": "#b9ae8d",
+    "Crafting": "#9f7b60",
+    "Firemaking": "#b85a32",
+    "Magic": "#5e6fb0",
+    "Fletching": "#7b6c54",
+    "Woodcutting": "#5f7a4f",
+    "Runecrafting": "#6e5d9b",
+    "Slayer": "#8b4a4a",
+    "Farming": "#64834c",
+    "Construction": "#8a6b4f",
+    "Hunter": "#7a6f54",
+    "Summoning": "#8c4f7f",
+    "Dungeoneering": "#5e5f67",
+    "Divination": "#4e7f89",
+    "Invention": "#88724f",
+    "Archaeology": "#927154",
+    "Necromancy": "#6f5b8f",
+}
+
+# Activity classification: type key -> display label + accent colour.
+ACTIVITY_TYPE_META: dict[str, dict[str, str]] = {
+    "quest": {"label": "Quest", "color": "#9ecb67"},
+    "clue": {"label": "Clue", "color": "#a48ad8"},
+    "level": {"label": "Level Up", "color": "#69a8ff"},
+    "kill": {"label": "Kill", "color": "#d78070"},
+    "loot": {"label": "Loot", "color": "#d1b366"},
+    "achievement": {"label": "Achievement", "color": "#95b999"},
+    "unlock": {"label": "Unlock", "color": "#6ec2bb"},
+    "activity": {"label": "Activity", "color": "#8da0b6"},
+}

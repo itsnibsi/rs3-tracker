@@ -187,4 +187,33 @@ Suggested improvement: add Stylelint with a minimal config to preserve consisten
 
 ---
 
-Final note: this plan includes a targeted quest-field schema change, but it should run only in a dedicated migration phase and be explicitly reviewed with you before execution in hosted environments.
+Q: What's your main priority right now?
+A: I think we should prioritize things we can do without affecting many different places, and get those out of the way before we start working on code splitting and a new frontend and performance.
+
+Q: How do you want to work through this?
+A: Break related items into clear chunks, give me the plan per chunk and then execute in order on my command
+
+---
+
+Current work task list, in order (finished chunks marked with **FINISHED**):
+
+**Chunk A — Constants & config consolidation** *(items 4, 5)* **FINISHED**
+Extract `config.py` for all env/config parsing, and create one canonical skill metadata module (names, order, colors, icon keys, cap rules). Zero logic change — just moving things to the right home before the module split touches them. Do this first so the split has clean imports to work with.
+
+**Chunk B — Structured logging** *(item 9)*
+Replace all `print()` calls with `logging` (structured, leveled). Isolated change, no behavior impact, makes every subsequent chunk easier to debug.
+
+**Chunk C — Security hardening** *(item 12)*
+CSRF tokens on admin POST actions, basic per-IP rate limiting middleware on admin endpoints. Touches only admin routes — no public surface change.
+
+**Chunk D — Backend module split** *(items 1, 2, 6, 7, 8)*
+Split `app.py` into `config` (already done in A), `db/repository.py`, `services/dashboard.py` + `services/charts.py`, `routes/public.py` + `routes/admin.py`, with `app.py` as thin composition root. This is the biggest chunk and the riskiest — doing it after A/B/C means imports and logging are already clean.
+
+**Chunk E — Collector & performance** *(items 14, 15)*
+Decouple collector scheduling from web lifecycle. Add targeted query/index improvements for hot paths. Depends on D being done so the repository layer is in place.
+
+**Chunk F — Frontend** *(items 16, 17, 18, 19, 20)*
+JS into static modules, loading/error states + accessibility, activity feed via paginated API, replace Moment adapter, CSS cleanup. Fully isolated from backend — can overlap with E if needed.
+
+**Chunk G — Documentation** *(item 22)*
+README update covering architecture, ingestion flow, deployment, admin safety. Do last so it reflects the final state.

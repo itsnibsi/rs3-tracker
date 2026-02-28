@@ -1,46 +1,15 @@
 import hashlib
-import os
 import sqlite3
 from datetime import datetime, timezone
 
 import requests
 
+from config import RS3_USERNAME
 from db import get_conn, init_db
+from skills import SKILL_NAMES
 
-USERNAME = os.getenv("RS3_USERNAME", "Varxis")
+USERNAME = RS3_USERNAME
 API_URL = f"https://apps.runescape.com/runemetrics/profile/profile?user={USERNAME}&activities=20"
-
-SKILL_NAMES = {
-    0: "Attack",
-    1: "Defence",
-    2: "Strength",
-    3: "Constitution",
-    4: "Ranged",
-    5: "Prayer",
-    6: "Magic",
-    7: "Cooking",
-    8: "Woodcutting",
-    9: "Fletching",
-    10: "Fishing",
-    11: "Firemaking",
-    12: "Crafting",
-    13: "Smithing",
-    14: "Mining",
-    15: "Herblore",
-    16: "Agility",
-    17: "Thieving",
-    18: "Slayer",
-    19: "Farming",
-    20: "Runecrafting",
-    21: "Hunter",
-    22: "Construction",
-    23: "Summoning",
-    24: "Dungeoneering",
-    25: "Divination",
-    26: "Invention",
-    27: "Archaeology",
-    28: "Necromancy",
-}
 
 
 def hash_activity(text, date, details):
