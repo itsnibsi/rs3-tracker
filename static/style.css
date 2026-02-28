@@ -39,7 +39,7 @@ h2 {
 
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, 1fr) minmax(280px, 1fr);
     gap: 16px;
     margin-bottom: 32px;
 }
@@ -49,6 +49,10 @@ h2 {
     padding: 20px;
     border-radius: 12px;
     border: 1px solid var(--border);
+}
+
+.stat-card-wide {
+    min-width: 0;
 }
 
 .stat-title {
@@ -70,6 +74,77 @@ h2 {
     margin-top: 4px;
 }
 
+.summary-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.summary-cell {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.summary-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.summary-value {
+    margin-top: 2px;
+    font-weight: 700;
+    font-size: 1.125rem;
+}
+
+.active-skills-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.active-skill-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+}
+
+.active-skills-empty {
+    margin-top: 10px;
+}
+
+.nearest-level-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.nearest-level-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.nearest-level-skill {
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.nearest-level-xp {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.95rem;
+    text-align: right;
+}
+
 .main-content {
     display: grid;
     grid-template-columns: 1fr 350px;
@@ -82,7 +157,21 @@ h2 {
 }
 
 @media (max-width: 1024px) {
+    .stats-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .summary-row {
+        grid-template-columns: 1fr;
+    }
+
     .main-content {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .stats-grid {
         grid-template-columns: 1fr;
     }
 }

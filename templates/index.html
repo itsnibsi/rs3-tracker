@@ -25,24 +25,56 @@
 
         {% if data %}
         <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-title">Total XP</div>
-                <div class="stat-value">{{ data.latest.total_xp_display }}</div>
-                <div class="stat-gain">+{{ data.xp_24h_display }} (24h)</div>
+            <div class="stat-card stat-card-wide">
+                <div class="stat-title">Account Summary</div>
+                <div class="stat-value">{{ data.latest.total_xp_display }} XP</div>
+                <div class="summary-row">
+                    <div class="summary-cell">
+                        <div class="summary-label">Total Level</div>
+                        <div class="summary-value">{{ "{:,}".format(data.latest.total_level) }}</div>
+                    </div>
+                    <div class="summary-cell">
+                        <div class="summary-label">Overall Rank</div>
+                        <div class="summary-value">{{ "{:,}".format(data.latest.overall_rank) }}</div>
+                    </div>
+                    <div class="summary-cell">
+                        <div class="summary-label">Combat</div>
+                        <div class="summary-value">{{ data.latest.combat_level }}</div>
+                    </div>
+                </div>
             </div>
             <div class="stat-card">
-                <div class="stat-title">Total Level</div>
-                <div class="stat-value">{{ "{:,}".format(data.latest.total_level) }}</div>
-                <div class="stat-gain">Combat: {{ data.latest.combat_level }}</div>
+                <div class="stat-title">Today's Biggest Gainers</div>
+                {% if data.top_gainers_today %}
+                <div class="active-skills-list">
+                    {% for s in data.top_gainers_today %}
+                    <div class="active-skill-row">
+                        <span>{{ loop.index }}. {{ s.skill }}</span>
+                        <span class="xp-gain-positive">+{{ s.xp_gain_display }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="summary-label active-skills-empty">No gains today</div>
+                {% endif %}
             </div>
-            <div class="stat-card">
-                <div class="stat-title">Overall Rank</div>
-                <div class="stat-value">{{ "{:,}".format(data.latest.overall_rank) }}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-title">XP Streak</div>
-                <div class="stat-value">{{ data.streak_days }} Days</div>
-                <div class="stat-gain">+{{ data.xp_7d_display }} (7d)</div>
+            <div class="stat-card closest-level-card">
+                <div class="stat-title">Closest Level-Ups</div>
+                {% if data.closest_levels %}
+                <div class="nearest-level-list">
+                    {% for s in data.closest_levels %}
+                    <div class="nearest-level-row">
+                        <div>
+                            <div class="nearest-level-skill">{{ loop.index }}. {{ s.skill }}</div>
+                            <div class="summary-label">To level {{ s.target_level }}</div>
+                        </div>
+                        <div class="nearest-level-xp">{{ s.xp_to_next_display }} XP</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="summary-label active-skills-empty">All tracked skills are maxed</div>
+                {% endif %}
             </div>
         </div>
 
@@ -137,7 +169,6 @@
             const sign = delta > 0 ? '+' : '';
             return `${sign}${numberFmt.format(Math.round(delta))}`;
         };
-
         // Format Local Time
         const lu = document.getElementById('lastUpdated');
         if (lu && lu.textContent !== 'Never') {

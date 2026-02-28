@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from collector import collect_snapshot
 from db import get_conn, init_db
-from utils import calculate_progress
+from utils import calculate_progress, xp_to_next_level
 
 templates = Jinja2Templates(directory="templates")
 
@@ -416,20 +416,6 @@ def get_dashboard_data():
         )
         prev_7d = get_window_baseline(cur, cutoff_7d, latest)
 
-        # Calculate XP Streak in consecutive days
-        cur.execute("""
-            SELECT date(timestamp) as dt, MAX(total_xp) as max_xp
-            FROM snapshots GROUP BY dt ORDER BY dt DESC
-        """)
-        rows = cur.fetchall()
-        streak = 0
-        if len(rows) >= 2:
-            for i in range(len(rows) - 1):
-                if rows[i]["max_xp"] > rows[i + 1]["max_xp"]:
-                    streak += 1
-                else:
-                    break
-
         # Skills & Progress
         cur.execute(
             "SELECT skill, level, xp, rank FROM skills WHERE snapshot_id = ?",
@@ -446,8 +432,20 @@ def get_dashboard_data():
                 prev_skills_map[r["skill"]] = r["xp"]
 
         skills_data = []
+        level_candidates = []
         for s in current_skills:
             gain = s["xp"] - prev_skills_map.get(s["skill"], s["xp"])
+            remaining_xp = xp_to_next_level(s["skill"], s["level"], s["xp"])
+            if remaining_xp > 0:
+                level_candidates.append(
+                    {
+                        "skill": s["skill"],
+                        "current_level": s["level"],
+                        "target_level": s["level"] + 1,
+                        "xp_to_next": remaining_xp,
+                        "xp_to_next_display": format_skill_xp(remaining_xp),
+                    }
+                )
             skills_data.append(
                 {
                     "skill": s["skill"],
@@ -463,6 +461,12 @@ def get_dashboard_data():
         # Sort by standard RS3 layout order
         order_map = {name: i for i, name in enumerate(RS3_ORDER)}
         skills_data.sort(key=lambda x: order_map.get(x["skill"], 999))
+        active_skills = sorted(
+            [s for s in skills_data if s["xp_gain"] > 0],
+            key=lambda s: s["xp_gain"],
+            reverse=True,
+        )
+        closest_levels = sorted(level_candidates, key=lambda s: s["xp_to_next"])[:3]
 
         cur.execute("SELECT text, date FROM activities ORDER BY id DESC LIMIT 20")
         activities = cur.fetchall()
@@ -489,7 +493,11 @@ def get_dashboard_data():
             "xp_7d": xp_7d,
             "xp_24h_display": format_total_xp(xp_24h),
             "xp_7d_display": format_total_xp(xp_7d),
-            "streak_days": streak,
+            "top_gainers_today": [
+                {"skill": s["skill"], "xp_gain_display": s["xp_gain_display"]}
+                for s in active_skills[:5]
+            ],
+            "closest_levels": closest_levels,
             "skills": skills_data,
             "activities": [dict(a) for a in activities],
             "timestamps": [r["timestamp"] + "Z" for r in history],
