@@ -358,7 +358,7 @@ h2 {
 
 .feed-stream {
     display: grid;
-    gap: 20px;
+    gap: 16px;
     align-content: start;
 }
 
@@ -368,93 +368,101 @@ h2 {
 }
 
 .feed-day-title {
-    margin: 0 0 12px 0;
+    margin: 0 0 10px 0;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 0.8rem;
+    font-size: 0.76rem;
 }
 
 .feed-card-flow {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px;
 }
 
 .feed-card {
-    --type-rgb: 141, 160, 182;
+    --card-accent: var(--accent);
+    --card-icon-url: url('/static/icons_64/activity.png');
+    display: grid;
+    grid-template-columns: 46px 1fr;
+    gap: 8px;
     width: fit-content;
     max-width: min(100%, 52ch);
     border: 1px solid var(--border);
-    background:
-        linear-gradient(145deg, rgba(var(--type-rgb), 0.12), rgba(18, 21, 25, 0.9) 32%),
-        rgba(18, 21, 25, 0.78);
-    border-radius: 14px;
-    padding: 12px 13px;
-    min-height: 74px;
+    border-radius: 10px;
+    background: rgba(18, 21, 25, 0.7);
+}
+
+.feed-card-rail {
+    width: 54px;
+    aspect-ratio: 1 / 1;
+    align-self: center;
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0) 100%);
+    mask-image: linear-gradient(to right, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.feed-card-rail::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    background-image: var(--card-icon-url);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 80% 80%;
+    transform: rotate(-8deg);
+    opacity: 0.88;
+    filter: saturate(0.85) contrast(0.95);
+}
+
+.feed-card-body {
+    padding: 8px 10px 8px 2px;
+    min-width: 0;
 }
 
 .feed-card-title {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: 0.84rem;
     font-weight: 600;
-    line-height: 1.36;
-}
-
-.feed-card-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.feed-card-permalink {
-    color: var(--text-muted);
-    text-decoration: none;
-    font-size: 0.72rem;
-    line-height: 1.2;
-    border-bottom: 1px dotted transparent;
-    white-space: nowrap;
-}
-
-.feed-card-permalink:hover {
-    color: var(--text-main);
-    border-bottom-color: var(--text-muted);
+    line-height: 1.3;
 }
 
 .feed-card-date {
-    margin-top: 6px;
+    margin-top: 4px;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.7rem;
 }
 
 .feed-type-level {
-    --type-rgb: 105, 168, 255;
+    --card-accent: #69a8ff;
 }
 
 .feed-type-quest {
-    --type-rgb: 158, 203, 103;
+    --card-accent: #9ecb67;
 }
 
 .feed-type-kill {
-    --type-rgb: 215, 128, 112;
+    --card-accent: #d78070;
 }
 
 .feed-type-loot {
-    --type-rgb: 209, 179, 102;
+    --card-accent: #d1b366;
 }
 
 .feed-type-achievement {
-    --type-rgb: 149, 185, 153;
+    --card-accent: #95b999;
 }
 
 .feed-type-clue {
-    --type-rgb: 164, 138, 216;
+    --card-accent: #a48ad8;
 }
 
 .feed-type-unlock {
-    --type-rgb: 110, 194, 187;
+    --card-accent: #6ec2bb;
 }
 
 /* Modal */
@@ -657,8 +665,19 @@ h2 {
     }
 
     .feed-card-flow {
-        display: grid;
-        grid-template-columns: 1fr;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+    }
+
+    .feed-card {
+        grid-template-columns: 42px 1fr;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .feed-card-rail {
+        width: 42px;
     }
 
     .activity-item {

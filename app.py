@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -80,6 +81,17 @@ SKILL_COLORS = {
     "Invention": "#88724f",
     "Archaeology": "#927154",
     "Necromancy": "#6f5b8f",
+}
+
+ACTIVITY_TYPE_META = {
+    "quest": {"label": "Quest", "color": "#9ecb67"},
+    "clue": {"label": "Clue", "color": "#a48ad8"},
+    "level": {"label": "Level Up", "color": "#69a8ff"},
+    "kill": {"label": "Kill", "color": "#d78070"},
+    "loot": {"label": "Loot", "color": "#d1b366"},
+    "achievement": {"label": "Achievement", "color": "#95b999"},
+    "unlock": {"label": "Unlock", "color": "#6ec2bb"},
+    "activity": {"label": "Activity", "color": "#8da0b6"},
 }
 
 
@@ -195,23 +207,44 @@ def parse_activity_ts(ts):
     return None
 
 
-def classify_activity(text):
+def detect_activity_skill(text):
     lowered = (text or "").lower()
+    for skill in RS3_ORDER:
+        if re.search(rf"\b{re.escape(skill.lower())}\b", lowered):
+            return skill
+    return None
+
+
+def classify_activity_meta(text, details=None):
+    combined = " ".join(part for part in (details, text) if part)
+    lowered = combined.lower()
+
+    type_key = "activity"
     if "quest" in lowered:
-        return "quest", "Quest"
-    if "clue" in lowered or "treasure trail" in lowered:
-        return "clue", "Clue"
-    if "levelled" in lowered or "leveled" in lowered or "advanced" in lowered:
-        return "level", "Level Up"
-    if "killed" in lowered or "defeated" in lowered or "slain" in lowered:
-        return "kill", "Kill"
-    if "drop" in lowered or "received" in lowered or "found" in lowered:
-        return "loot", "Loot"
-    if "achievement" in lowered or "completed" in lowered:
-        return "achievement", "Achievement"
-    if "unlocked" in lowered:
-        return "unlock", "Unlock"
-    return "activity", "Activity"
+        type_key = "quest"
+    elif "clue" in lowered or "treasure trail" in lowered:
+        type_key = "clue"
+    elif "levelled" in lowered or "leveled" in lowered or "advanced" in lowered:
+        type_key = "level"
+    elif "killed" in lowered or "defeated" in lowered or "slain" in lowered:
+        type_key = "kill"
+    elif "drop" in lowered or "received" in lowered or "found" in lowered:
+        type_key = "loot"
+    elif "achievement" in lowered or "completed" in lowered:
+        type_key = "achievement"
+    elif "unlocked" in lowered:
+        type_key = "unlock"
+
+    skill = detect_activity_skill(combined) if type_key == "level" else None
+    fallback = ACTIVITY_TYPE_META["activity"]
+    meta = ACTIVITY_TYPE_META.get(type_key, fallback)
+    color = SKILL_COLORS.get(skill, meta["color"]) if skill else meta["color"]
+    return {
+        "type_key": type_key,
+        "type_label": meta["label"],
+        "skill": skill,
+        "color": color,
+    }
 
 
 def normalize_bucket(timeframe):
@@ -627,7 +660,7 @@ def get_dashboard_data():
         activities = []
         for row in cur.fetchall():
             parsed = parse_activity_ts(row["date"])
-            type_key, type_label = classify_activity(row["text"])
+            activity_meta = classify_activity_meta(row["text"], row["details"])
             activities.append(
                 {
                     "id": row["id"],
@@ -638,8 +671,10 @@ def get_dashboard_data():
                     if parsed
                     else None,
                     "sort_ts": parsed or datetime.min.replace(tzinfo=timezone.utc),
-                    "type_key": type_key,
-                    "type_label": type_label,
+                    "type_key": activity_meta["type_key"],
+                    "type_label": activity_meta["type_label"],
+                    "skill": activity_meta["skill"],
+                    "color": activity_meta["color"],
                 }
             )
         activities.sort(key=lambda a: (a["sort_ts"], a["id"]), reverse=True)
@@ -652,6 +687,8 @@ def get_dashboard_data():
                 "date_iso": a["date_iso"],
                 "type_key": a["type_key"],
                 "type_label": a["type_label"],
+                "skill": a["skill"],
+                "color": a["color"],
             }
             for a in activities
         ]

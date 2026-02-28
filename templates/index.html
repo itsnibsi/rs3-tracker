@@ -93,7 +93,6 @@
                             <button class="tf-btn tab-btn active" data-tab="skills">Skills</button>
                             <button class="tf-btn tab-btn" data-tab="feed">Activity Feed</button>
                         </div>
-                        <span id="tabMetaText" class="skills-gain-indicator">Gains shown: today (UTC)</span>
                     </div>
 
                     <div class="tab-content active" data-tab-content="skills">
@@ -133,11 +132,6 @@
                 <div class="panel" style="margin-bottom: 24px;">
                     <h2>Total XP (30 Days)</h2>
                     <canvas id="totalXpChart" height="200"></canvas>
-                </div>
-
-                <div class="panel">
-                    <h2>Feed Breakdown</h2>
-                    <div id="activityTypeSummary" class="active-skills-list"></div>
                 </div>
             </div>
         </div>
@@ -250,12 +244,10 @@
         function renderActivityFeed(items) {
             const rail = document.getElementById('feedRailNav');
             const stream = document.getElementById('feedStream');
-            const summary = document.getElementById('activityTypeSummary');
-            if (!rail || !stream || !summary) return;
+            if (!rail || !stream) return;
 
             rail.innerHTML = '';
             stream.innerHTML = '';
-            summary.innerHTML = '';
 
             const groups = groupActivitiesByDay(items);
             const now = new Date();
@@ -292,24 +284,20 @@
                     const card = document.createElement('article');
                     card.className = `feed-card feed-type-${activity.type_key || 'activity'}`;
                     if (activity.id != null) card.id = `feed-activity-${activity.id}`;
+                    if (activity.color) card.style.setProperty('--card-accent', activity.color);
 
-                    const header = document.createElement('div');
-                    header.className = 'feed-card-header';
+                    const rail = document.createElement('div');
+                    rail.className = 'feed-card-rail';
+                    const iconPath = activity.skill
+                        ? `/static/skills_64/${activity.skill.toLowerCase()}.png`
+                        : `/static/icons_64/${activity.type_key || 'activity'}.png`;
+                    rail.style.setProperty('--card-icon-url', `url("${iconPath}")`);
+
+                    const body = document.createElement('div');
+                    body.className = 'feed-card-body';
                     const title = document.createElement('h4');
                     title.className = 'feed-card-title';
                     title.textContent = activity.details ?? activity.text;
-
-                    if (activity.id != null) {
-                        const link = document.createElement('a');
-                        link.className = 'feed-card-permalink';
-                        link.href = `?tab=feed#feed-activity-${activity.id}`;
-                        link.title = 'Permalink to this activity';
-                        link.textContent = 'link';
-                        header.appendChild(title);
-                        header.appendChild(link);
-                    } else {
-                        header.appendChild(title);
-                    }
 
                     const date = document.createElement('div');
                     date.className = 'feed-card-date';
@@ -322,8 +310,10 @@
                         date.textContent = activity.date || '';
                     }
 
-                    card.appendChild(header);
-                    card.appendChild(date);
+                    body.appendChild(title);
+                    body.appendChild(date);
+                    card.appendChild(rail);
+                    card.appendChild(body);
                     cardFlow.appendChild(card);
 
                     const typeLabel = activity.type_label || 'Activity';
@@ -345,7 +335,6 @@
                     c.textContent = numberFmt.format(count);
                     row.appendChild(l);
                     row.appendChild(c);
-                    summary.appendChild(row);
                 });
         }
 
@@ -369,12 +358,6 @@
             document.querySelectorAll('.tab-content').forEach((content) => {
                 content.classList.toggle('active', content.dataset.tabContent === tab);
             });
-            const meta = document.getElementById('tabMetaText');
-            if (meta) {
-                meta.textContent = tab === 'skills'
-                    ? 'Gains shown: today (UTC)'
-                    : `${numberFmt.format(activitiesData.length)} total activities`;
-            }
             if (updateUrl) writeTabToUrl(tab);
         }
 
