@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import sqlite3
 
 import httpx
 
@@ -14,7 +13,6 @@ logger = get_logger(__name__)
 USERNAME = RS3_USERNAME
 API_URL = f"https://apps.runescape.com/runemetrics/profile/profile?user={USERNAME}&activities=20"
 
-# Global lock to prevent concurrent snapshot collections (e.g., background loop vs manual trigger)
 _collection_lock = asyncio.Lock()
 
 
@@ -46,7 +44,6 @@ def to_int(value, default=0):
 
 
 async def _fetch_runemetrics_data(client: httpx.AsyncClient, retries: int = 3):
-    """Fetch data with exponential backoff for resilience."""
     for attempt in range(retries):
         try:
             r = await client.get(API_URL, timeout=15.0)
@@ -62,12 +59,11 @@ async def _fetch_runemetrics_data(client: httpx.AsyncClient, retries: int = 3):
             if attempt == retries - 1:
                 logger.error("All retries failed for RuneMetrics API.")
                 return None
-            await asyncio.sleep(2**attempt)  # 1s, 2s, 4s...
+            await asyncio.sleep(2**attempt)
     return None
 
 
 async def collect_snapshot():
-    """Asynchronous collector that safely blocks concurrent runs."""
     async with _collection_lock:
         async with httpx.AsyncClient() as client:
             data = await _fetch_runemetrics_data(client)
@@ -82,15 +78,16 @@ async def collect_snapshot():
             )
             return
 
-        # Execute DB inserts synchronously (SQLite handles this instantly with WAL mode)
         with get_conn() as conn:
-            cur = conn.cursor()
-
-            cur.execute(
-                "INSERT OR IGNORE INTO players (username) VALUES (?)", (USERNAME,)
+            # INSERT OR IGNORE → ON CONFLICT DO NOTHING
+            conn.execute(
+                "INSERT INTO players (username) VALUES (%s) ON CONFLICT DO NOTHING",
+                (USERNAME,),
             )
-            cur.execute("SELECT id FROM players WHERE username=?", (USERNAME,))
-            player_id = cur.fetchone()["id"]
+            row = conn.execute(
+                "SELECT id FROM players WHERE username = %s", (USERNAME,)
+            ).fetchone()
+            player_id = row["id"]
 
             rank = to_int(data.get("rank"), 0)
             total_xp = to_int(data.get("totalxp"), 0)
@@ -100,19 +97,15 @@ async def collect_snapshot():
             quests_complete = to_int(data.get("questscomplete"), 0)
             quests_not_started = to_int(data.get("questsnotstarted"), 0)
 
-            cur.execute(
+            # Use RETURNING id instead of lastrowid
+            row = conn.execute(
                 """
                 INSERT INTO snapshots (
-                    player_id,
-                    total_xp,
-                    total_level,
-                    overall_rank,
-                    combat_level,
-                    quests_started,
-                    quests_complete,
-                    quests_not_started
+                    player_id, total_xp, total_level, overall_rank,
+                    combat_level, quests_started, quests_complete, quests_not_started
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """,
                 (
                     player_id,
@@ -124,52 +117,49 @@ async def collect_snapshot():
                     quests_complete,
                     quests_not_started,
                 ),
-            )
-            snapshot_id = cur.lastrowid
+            ).fetchone()
+            snapshot_id = row["id"]
 
-            skills_data = []
-            for skill in data["skillvalues"]:
-                skill_name = SKILL_NAMES.get(skill["id"], f"Unknown-{skill['id']}")
-                skills_data.append(
-                    (
-                        snapshot_id,
-                        skill_name,
-                        to_int(skill.get("level"), 0),
-                        to_int(skill.get("xp"), 0),
-                        to_int(skill.get("rank"), 0),
-                    )
+            skills_data = [
+                (
+                    snapshot_id,
+                    SKILL_NAMES.get(skill["id"], f"Unknown-{skill['id']}"),
+                    to_int(skill.get("level"), 0),
+                    to_int(skill.get("xp"), 0),
+                    to_int(skill.get("rank"), 0),
                 )
+                for skill in data["skillvalues"]
+            ]
 
-            cur.executemany(
-                "INSERT INTO skills (snapshot_id, skill, level, xp, rank) VALUES (?, ?, ?, ?, ?)",
-                skills_data,
-            )
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO skills (snapshot_id, skill, level, xp, rank) VALUES (%s, %s, %s, %s, %s)",
+                    skills_data,
+                )
 
             for act in data.get("activities", []):
                 details = act.get("details")
                 h = hash_activity(act["text"], act["date"], details)
                 legacy_h = legacy_hash_activity(act["text"], act["date"])
-                cur.execute(
-                    "SELECT 1 FROM activities WHERE hash IN (?, ?) LIMIT 1",
+                existing = conn.execute(
+                    "SELECT 1 FROM activities WHERE hash IN (%s, %s) LIMIT 1",
                     (h, legacy_h),
-                )
-                if cur.fetchone():
+                ).fetchone()
+                if existing:
                     continue
-                try:
-                    cur.execute(
-                        "INSERT INTO activities (snapshot_id, text, date, details, hash) VALUES (?, ?, ?, ?, ?)",
-                        (snapshot_id, act["text"], act["date"], details, h),
-                    )
-                except sqlite3.IntegrityError:
-                    pass  # Duplicate activity, ignore
+                # The hash column has a UNIQUE constraint — ON CONFLICT DO NOTHING handles races
+                conn.execute(
+                    """
+                    INSERT INTO activities (snapshot_id, text, date, details, hash)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (snapshot_id, act["text"], act["date"], details, h),
+                )
 
             conn.commit()
 
-        logger.info(
-            "Snapshot collected for %s — total XP: %s",
-            USERNAME,
-            total_xp,
-        )
+        logger.info("Snapshot collected for %s — total XP: %s", USERNAME, total_xp)
 
 
 if __name__ == "__main__":
