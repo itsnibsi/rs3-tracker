@@ -39,6 +39,20 @@ h2 {
     font-weight: 600;
 }
 
+/* Utility classes used in templates */
+.text-muted {
+    color: var(--text-muted);
+}
+
+.header-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.panel-chart {
+    margin-bottom: 24px;
+}
+
 .stats-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(220px, 1fr) minmax(280px, 1fr);
@@ -189,7 +203,6 @@ h2 {
     .stats-grid {
         grid-template-columns: 1fr;
     }
-
 }
 
 .panel {
@@ -250,7 +263,7 @@ h2 {
     border-radius: 8px;
     padding: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: border-color 0.2s, transform 0.2s;
 }
 
 .skill-card:hover {
@@ -301,36 +314,6 @@ h2 {
     height: 100%;
     border-radius: 3px;
     transition: width 0.5s ease-out;
-}
-
-.activities-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.activity-item {
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    display: grid;
-    grid-template-columns: 150px 1fr;
-    gap: 10px;
-    align-items: start;
-}
-
-.activity-item:last-child {
-    border-bottom: none;
-}
-
-.activity-date {
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    margin-top: 1px;
-}
-
-.activity-text {
-    font-size: 0.82rem;
 }
 
 .feed-layout {
@@ -449,6 +432,10 @@ h2 {
     font-size: 0.7rem;
 }
 
+.feed-error {
+    color: var(--danger);
+}
+
 .feed-type-level {
     --card-accent: #69a8ff;
 }
@@ -544,7 +531,7 @@ h2 {
     padding: 8px 16px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s, border-color 0.2s;
     font-weight: 600;
 }
 
@@ -678,7 +665,6 @@ h2 {
     }
 
     .feed-card-flow {
-        display: flex;
         flex-direction: column;
         gap: 7px;
     }
@@ -691,11 +677,6 @@ h2 {
 
     .feed-card-rail {
         width: 42px;
-    }
-
-    .activity-item {
-        grid-template-columns: 1fr;
-        gap: 2px;
     }
 
     .admin-overview-grid {

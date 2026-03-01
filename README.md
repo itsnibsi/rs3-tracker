@@ -1,13 +1,64 @@
+# RS3 Tracker
+
+A personal RuneScape 3 progress tracker. Collects hourly snapshots from the RuneMetrics API and displays XP history, skill progress, and activity feed on a dashboard.
+
+## Architecture overview
+
+```
+app.py                  — FastAPI composition root (lifespan, mounts, router inclusion)
+collector.py            — RuneMetrics API fetch + DB ingestion
+config.py               — All env/config parsing with defaults
+db.py                   — Connection pool, base schema, migration runner, indexes
+skills.py               — Canonical skill metadata (names, order, colors, caps, activity taxonomy)
+utils.py                — XP/level math (progress bars, xp-to-next-level)
+web.py                  — Shared Jinja2Templates instance
+routes/
+  public.py             — Dashboard page + all read-only API endpoints
+  admin.py              — Admin page + maintenance endpoints (auth, CSRF, rate limiting)
+services/
+  dashboard.py          — Dashboard data assembly and activity helpers
+  charts.py             — Chart data, windowing/bucketing, XP formatting
+  admin.py              — Admin DB overview query
+static/js/
+  feed.js               — Activity feed: fetch, group by day, render cards
+  charts.js             — Total XP sidebar chart + skill history modal
+templates/
+  index.html            — Dashboard template
+  admin.html            — Admin template
+```
+
+Ingestion is deliberately decoupled from the web process — see **Collector scheduling** below.
+
+## Collector scheduling
+
+Hourly snapshot collection is triggered by Cloud Scheduler rather than running inside the web process. This prevents duplicate collections when Cloud Run scales to multiple instances and decouples ingestion health from web server health.
+
+The target endpoint is `POST /api/update`. Cloud Scheduler hits it on a cron schedule. The admin page retains a manual "Collect Snapshot Now" button as a fallback.
+
+See `cloudscheduler.yaml` for full setup and management commands.
+
+## Database
+
+The app uses **PostgreSQL** via [Neon](https://neon.tech). The connection string is passed via `DATABASE_URL` environment variable.
+
+Schema is created by `init_db()` on startup. Versioned migrations are tracked in the `schema_migrations` table and applied automatically at startup. To run migrations manually:
+
+```bash
+python db.py migrate
+```
+
 ## Admin page
 
 The app exposes a protected admin page at `/admin` with:
 
 - A SQL console (single statement per run, max 200 result rows shown)
 - Snapshot collection trigger
-- SQLite maintenance actions (`VACUUM`, WAL checkpoint)
-- Basic DB overview (table row counts, DB size, latest snapshot timestamp)
+- `VACUUM` and WAL checkpoint maintenance actions
+- DB overview (table row counts, latest snapshot timestamp)
 
-### Configure admin auth (outside git)
+Admin endpoints are protected by HTTP Basic auth, CSRF tokens (double-submit cookie pattern), and per-IP rate limiting.
+
+### Configure admin credentials
 
 Set these environment variables in Cloud Run:
 
@@ -40,7 +91,7 @@ printf 'admin' | gcloud secrets versions add rs3-admin-username --data-file=-
 printf 'change-me' | gcloud secrets versions add rs3-admin-password --data-file=-
 ```
 
-2. Grant your Cloud Run runtime service account access:
+2. Grant the Cloud Run service account access:
 
 ```bash
 SERVICE_ACCOUNT="$(gcloud run services describe rs3-tracker \
@@ -71,66 +122,31 @@ gcloud run services update rs3-tracker \
 
 ### Cloud Build integration
 
-`cloudbuild.yaml` now supports optional substitutions for admin secrets:
+`cloudbuild.yaml` supports optional substitutions for admin secrets and the database URL:
 
-- `_ADMIN_USERNAME_SECRET`
-- `_ADMIN_PASSWORD_SECRET`
+- `_ADMIN_USERNAME_SECRET` — defaults to `rs3-admin-username`
+- `_ADMIN_PASSWORD_SECRET` — defaults to `rs3-admin-password`
+- `_DBURL` — defaults to `rs3-tracker-dburl`
 
-Set both in your Cloud Build trigger (for example `rs3-admin-username` and `rs3-admin-password`) to auto-bind secrets on every deploy.
-If you leave them empty, deploy still succeeds, but admin auth vars must already exist on the service (or `/admin` stays disabled).
-
-## Schema migrations
-
-The app now uses versioned SQLite migrations tracked in `schema_migrations`.
-
-- `init_db()` creates base tables and applies pending migrations.
-- FastAPI startup already calls `init_db()`, so new revisions apply pending migrations automatically when the container starts.
-- You can also run migrations manually:
-
-```bash
-python db.py migrate
-```
-
-Current migration includes snapshot quest field cleanup:
-
-- Renames `snapshots.quest_points` -> `snapshots.quests_started`
-- Adds `snapshots.quests_complete`
-- Adds `snapshots.quests_not_started`
-
-### Cloud Run rollout checklist for schema changes
-
-1. Deploy code that includes the migration.
-2. Keep at least one instance start after deploy (startup runs migrations).
-3. Verify logs for migration success.
-4. Validate schema quickly from admin SQL console:
-
-```sql
-PRAGMA table_info(snapshots);
-```
-
-For future schema changes, add a new migration entry in `db.py` and avoid editing old migration steps.
+Set these in your Cloud Build trigger to auto-bind secrets on every deploy. If left empty, deploy still succeeds but the env vars must already exist on the service.
 
 ## Automated checks
 
 GitHub Actions workflow: `.github/workflows/ci.yml`
 
-It now validates every push and pull request with:
+Validates every push and pull request with:
 
 1. `ruff check .`
 2. `pytest`
 3. `docker build --tag rs3-tracker-ci .`
 
-## Review plan status
+## Environment variables
 
-Recently completed from `REVIEW.md`:
-
-- Migration framework in `db.py` and schema migration execution
-- Quest field migration (`quests_started`, `quests_complete`, `quests_not_started`)
-- Collector quest-field mapping update
-- Secret Manager deployment wiring in `cloudbuild.yaml`
-
-Next recommended implementation block:
-
-1. Break down `app.py` into `config`, routes, repositories, and services while preserving behavior.
-2. Move collector scheduling out of web app lifespan (Cloud Scheduler or Cloud Run Job).
-3. Add admin POST CSRF protection and lightweight admin rate limiting.
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string (Neon) |
+| `RS3_USERNAME` | No | `Varxis` | RuneScape username to track |
+| `ADMIN_USERNAME` | No | — | Admin HTTP Basic username; omit to disable admin |
+| `ADMIN_PASSWORD` | No | — | Admin HTTP Basic password |
+| `SECRET_KEY` | No | random | CSRF token signing key; set for stability across restarts |
+| `LOG_LEVEL` | No | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |

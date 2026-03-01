@@ -15,7 +15,7 @@ from services.charts import (
     get_skills_totals_data,
     get_total_xp_gains_data,
 )
-from services.dashboard import get_dashboard_data
+from services.dashboard import get_activities_data, get_dashboard_data
 from web import templates
 
 router = APIRouter()
@@ -56,6 +56,16 @@ def api_chart(skill_name: str, period: str = "day"):
 @router.get("/api/total_xp_gains/{timeframe}")
 def api_total_xp_gains(timeframe: str = "day"):
     return get_total_xp_gains_data(timeframe)
+
+
+# ---------------------------------------------------------------------------
+# Activity feed API
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/activities")
+def api_activities():
+    return get_activities_data()
 
 
 # ---------------------------------------------------------------------------

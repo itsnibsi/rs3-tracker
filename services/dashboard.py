@@ -19,8 +19,7 @@ from services.charts import (
 from skills import ACTIVITY_TYPE_META, RS3_ORDER, SKILL_COLORS
 from utils import calculate_progress, xp_to_next_level
 
-# Maximum number of activities shown on the dashboard feed.
-# Keeps the payload and Python-side sort bounded as history grows.
+# Maximum number of activities returned by get_activities_data.
 ACTIVITY_FEED_LIMIT = 500
 
 # ---------------------------------------------------------------------------
@@ -68,13 +67,49 @@ def classify_activity_meta(text: str | None, details: str | None = None) -> dict
     }
 
 
+def _build_activity(row) -> dict:
+    parsed = parse_activity_ts(row["date"])
+    meta = classify_activity_meta(row["text"], row["details"])
+    return {
+        "id": row["id"],
+        "text": row["text"],
+        "date": row["date"],
+        "details": row["details"],
+        "date_iso": parsed.isoformat().replace("+00:00", "Z") if parsed else None,
+        "sort_ts": parsed or datetime.min.replace(tzinfo=timezone.utc),
+        **meta,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Activities service function (used by /api/activities)
+# ---------------------------------------------------------------------------
+
+
+def get_activities_data() -> list[dict]:
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, text, date, details
+            FROM activities
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (ACTIVITY_FEED_LIMIT,),
+        )
+        activities = [_build_activity(row) for row in cur.fetchall()]
+
+    activities.sort(key=lambda a: (a["sort_ts"], a["id"]), reverse=True)
+    return [{k: v for k, v in a.items() if k != "sort_ts"} for a in activities]
+
+
 # ---------------------------------------------------------------------------
 # Main dashboard query
 # ---------------------------------------------------------------------------
 
 
 def _ts_to_str(ts) -> str | None:
-    """Normalise a timestamp column value to an ISO string for the template."""
     if ts is None:
         return None
     if hasattr(ts, "isoformat"):
@@ -102,14 +137,9 @@ def get_dashboard_data() -> dict | None:
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        cutoff_today = today_start
-        prev_today = get_window_baseline(cur, cutoff_today, latest)
-
-        cutoff_24h = now - timedelta(hours=24)
-        prev_24h = get_window_baseline(cur, cutoff_24h, latest)
-
-        cutoff_7d = now - timedelta(days=7)
-        prev_7d = get_window_baseline(cur, cutoff_7d, latest)
+        prev_today = get_window_baseline(cur, today_start, latest)
+        prev_24h = get_window_baseline(cur, now - timedelta(hours=24), latest)
+        prev_7d = get_window_baseline(cur, now - timedelta(days=7), latest)
 
         # ------------------------------------------------------------------
         # Skills
@@ -173,11 +203,9 @@ def get_dashboard_data() -> dict | None:
         closest_levels = sorted(level_candidates, key=lambda s: s["xp_to_next"])[:3]
 
         # ------------------------------------------------------------------
-        # Activities
+        # Today's quest count — still needed for highlights, but we no longer
+        # ship the full activity list with the dashboard payload.
         # ------------------------------------------------------------------
-        # ORDER BY id DESC pre-sorts by insertion order (a reliable recency
-        # proxy) so the Python sort below operates on an already-close
-        # ordering.  LIMIT caps memory and payload size as history grows.
         cur.execute(
             """
             SELECT id, text, date, details
@@ -187,34 +215,13 @@ def get_dashboard_data() -> dict | None:
             """,
             (ACTIVITY_FEED_LIMIT,),
         )
-        activities: list[dict] = []
+        today_quests_finished = 0
         for row in cur.fetchall():
             parsed = parse_activity_ts(row["date"])
-            meta = classify_activity_meta(row["text"], row["details"])
-            activities.append(
-                {
-                    "id": row["id"],
-                    "text": row["text"],
-                    "date": row["date"],
-                    "details": row["details"],
-                    "date_iso": parsed.isoformat().replace("+00:00", "Z")
-                    if parsed
-                    else None,
-                    "sort_ts": parsed or datetime.min.replace(tzinfo=timezone.utc),
-                    **meta,
-                }
-            )
-        activities.sort(key=lambda a: (a["sort_ts"], a["id"]), reverse=True)
-
-        today_quests_finished = sum(
-            1
-            for a in activities
-            if a["type_key"] == "quest" and a["sort_ts"] >= today_start
-        )
-
-        activities_out = [
-            {k: v for k, v in a.items() if k != "sort_ts"} for a in activities
-        ]
+            if parsed and parsed >= today_start:
+                meta = classify_activity_meta(row["text"], row["details"])
+                if meta["type_key"] == "quest":
+                    today_quests_finished += 1
 
         # ------------------------------------------------------------------
         # 30-day XP history (sidebar chart)
@@ -273,7 +280,6 @@ def get_dashboard_data() -> dict | None:
             ],
             "closest_levels": closest_levels,
             "skills": skills_data,
-            "activities": activities_out,
             "timestamps": [
                 (_ts_to_str(r["timestamp"]) or "").rstrip("Z") + "Z" for r in history
             ],
