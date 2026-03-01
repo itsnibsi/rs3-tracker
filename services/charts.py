@@ -1,11 +1,19 @@
 """
-Time-window and XP-aggregation helpers.
+Chart helpers split into two layers:
 
-Pure functions only — no DB access, no FastAPI imports.  All chart and
-history endpoints delegate their heavy lifting here.
+  Pure helpers  — time-window math, bucket arithmetic, XP scaling/formatting,
+                  and aggregation.  No DB access, no FastAPI imports.  Easy to
+                  unit-test in isolation.
+
+  Service functions — combine a DB fetch with the pure helpers above and return
+                      a ready-to-serialise dict/list.  These are what the route
+                      handlers call.
 """
 
 from datetime import datetime, timedelta, timezone
+
+from db import get_conn
+from skills import RS3_ORDER
 
 # ---------------------------------------------------------------------------
 # XP scaling / formatting
@@ -211,7 +219,7 @@ def get_timeframe_window(
 
 
 # ---------------------------------------------------------------------------
-# Aggregators
+# Aggregators (pure)
 # ---------------------------------------------------------------------------
 
 
@@ -359,11 +367,11 @@ def build_bucket_gains(rows, bucket: str, value_key: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Misc helpers
+# Misc pure helpers
 # ---------------------------------------------------------------------------
 
 
-def get_window_baseline(cur, cutoff: str, latest):
+def get_window_baseline(cur, cutoff, latest):
     cur.execute(
         "SELECT * FROM snapshots WHERE timestamp <= %s ORDER BY timestamp DESC LIMIT 1",
         (cutoff,),
@@ -380,3 +388,135 @@ def get_window_baseline(cur, cutoff: str, latest):
 
 def series_has_data(values: list) -> bool:
     return any(value is not None for value in values)
+
+
+# ---------------------------------------------------------------------------
+# Service functions — DB fetch + computation
+# Each function is the single source of truth for one API endpoint's data.
+# ---------------------------------------------------------------------------
+
+
+def _fetch_earliest_ts(cur) -> datetime | None:
+    cur.execute("SELECT MIN(timestamp) AS min_ts FROM snapshots")
+    row = cur.fetchone()
+    return row["min_ts"] if row else None
+
+
+def get_skill_history_data(skill_name: str, timeframe: str) -> list[dict]:
+    """Data for /api/skill_history/{skill_name}/{timeframe}."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        min_ts = _fetch_earliest_ts(cur)
+        now = datetime.now(timezone.utc)
+        start, end, bucket = get_timeframe_window(timeframe, now, min_ts)
+        starts = build_bucket_starts(start, end, bucket)
+
+        cur.execute(
+            """
+            SELECT s.timestamp, sk.xp
+            FROM skills sk
+            JOIN snapshots s ON sk.snapshot_id = s.id
+            WHERE sk.skill = %s AND s.timestamp < %s
+            ORDER BY s.timestamp ASC
+            """,
+            (skill_name, advance_bucket(end, bucket)),
+        )
+        rows = cur.fetchall()
+
+    totals = aggregate_bucket_totals(rows, bucket, starts, "xp", scale_skill_xp)
+    labels = [format_bucket_label(b, bucket) for b in starts]
+    return [{"timestamp": ts, "total": v} for ts, v in zip(labels, totals)]
+
+
+def get_skills_totals_data(timeframe: str) -> dict:
+    """Data for /api/skills_totals/{timeframe}."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        min_ts = _fetch_earliest_ts(cur)
+        now = datetime.now(timezone.utc)
+        start, end, bucket = get_timeframe_window(timeframe, now, min_ts)
+        starts = build_bucket_starts(start, end, bucket)
+
+        cur.execute(
+            """
+            SELECT s.timestamp, sk.skill, sk.xp
+            FROM skills sk
+            JOIN snapshots s ON sk.snapshot_id = s.id
+            WHERE s.timestamp < %s
+            ORDER BY s.timestamp ASC
+            """,
+            (advance_bucket(end, bucket),),
+        )
+        rows = cur.fetchall()
+
+    per_skill_rows: dict[str, list] = {}
+    for row in rows:
+        per_skill_rows.setdefault(row["skill"], []).append(row)
+
+    labels = [format_bucket_label(b, bucket) for b in starts]
+    order_map = {name: i for i, name in enumerate(RS3_ORDER)}
+    series = []
+    for skill in sorted(per_skill_rows, key=lambda x: order_map.get(x, 999)):
+        values = aggregate_bucket_totals(
+            per_skill_rows[skill], bucket, starts, "xp", scale_skill_xp
+        )
+        series.append({"skill": skill, "totals": values})
+
+    return {"labels": labels, "series": series}
+
+
+def get_chart_data(skill_name: str, period: str) -> dict:
+    """Data for /api/chart/{skill_name}/{period}."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        min_ts = _fetch_earliest_ts(cur)
+        now = datetime.now(timezone.utc)
+        start, end, bucket = get_period_window(period, now, min_ts)
+        starts = build_bucket_starts(start, end, bucket)
+        end_exclusive = advance_bucket(end, bucket)
+
+        if skill_name.lower() == "total":
+            cur.execute(
+                """
+                SELECT timestamp, total_xp AS xp
+                FROM snapshots
+                WHERE timestamp < %s
+                ORDER BY timestamp ASC
+                """,
+                (end_exclusive,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT s.timestamp, sk.xp
+                FROM skills sk
+                JOIN snapshots s ON sk.snapshot_id = s.id
+                WHERE sk.skill = %s AND s.timestamp < %s
+                ORDER BY s.timestamp ASC
+                """,
+                (skill_name, end_exclusive),
+            )
+
+        rows = cur.fetchall()
+
+    scale_fn = scale_total_xp if skill_name.lower() == "total" else scale_skill_xp
+    totals = aggregate_last_snapshot_totals(rows, bucket, starts, "xp", scale_fn)
+    labels = [format_bucket_label(b, bucket) for b in starts]
+
+    return {
+        "labels": labels,
+        "totals": totals,
+        "has_gains": series_has_data(totals),
+        "period": normalize_period(period),
+        "skill": "Total" if skill_name.lower() == "total" else skill_name,
+    }
+
+
+def get_total_xp_gains_data(timeframe: str) -> list[dict]:
+    """Data for /api/total_xp_gains/{timeframe}."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT timestamp, total_xp FROM snapshots ORDER BY timestamp ASC")
+        rows = cur.fetchall()
+
+    return build_bucket_gains(rows, normalize_bucket(timeframe), "total_xp")

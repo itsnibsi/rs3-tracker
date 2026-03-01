@@ -13,9 +13,6 @@ RUN uv pip install --system .
 COPY static ./static
 COPY templates ./templates
 
-ENV DATA_DIR=/data
-RUN mkdir -p /data
-
 EXPOSE 8080
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

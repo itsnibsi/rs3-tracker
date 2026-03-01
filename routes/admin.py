@@ -12,6 +12,7 @@ Security model
   affect legitimate use but blocks unsophisticated brute-force attempts.
 """
 
+import os
 import secrets
 import threading
 from collections import defaultdict
@@ -19,14 +20,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import psycopg
+import psycopg as _psycopg
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from collector import collect_snapshot
 from config import ADMIN_PASSWORD, ADMIN_USERNAME
-from db import get_conn
 from log import get_logger
+from services.admin import get_admin_overview
 from web import templates
 
 logger = get_logger(__name__)
@@ -121,35 +123,8 @@ def require_admin(
 
 
 # ---------------------------------------------------------------------------
-# Template helpers
+# Rendering helper
 # ---------------------------------------------------------------------------
-
-
-def _get_admin_overview() -> dict:
-    table_counts = []
-    with get_conn() as conn:
-        cur = conn.cursor()
-        for table in ("players", "snapshots", "skills", "activities"):
-            cur.execute(f"SELECT COUNT(*) AS count FROM {table}")
-            row = cur.fetchone()
-            table_counts.append({"name": table, "count": row["count"]})
-
-        cur.execute("SELECT timestamp FROM snapshots ORDER BY timestamp DESC LIMIT 1")
-        latest_row = cur.fetchone()
-
-    # DB_PATH is kept in config for API compatibility but doesn't refer to a
-    # real file now — show the Postgres connection instead.
-    latest_ts = None
-    if latest_row:
-        ts = latest_row["timestamp"]
-        latest_ts = ts.isoformat() if hasattr(ts, "isoformat") else ts
-
-    return {
-        "db_path": "PostgreSQL (Neon)",
-        "db_size_mb": "N/A",
-        "latest_snapshot_ts": latest_ts,
-        "table_counts": table_counts,
-    }
 
 
 def _render_admin(
@@ -167,7 +142,7 @@ def _render_admin(
         "admin.html",
         {
             "request": request,
-            "overview": _get_admin_overview(),
+            "overview": get_admin_overview(),
             "csrf_token": csrf_token,
             "sql": sql,
             "sql_error": sql_error,
@@ -202,6 +177,8 @@ def admin_run_sql(
     sql: str = Form(...),
     csrf_token: str = Form(..., alias=_CSRF_FIELD),
 ):
+    # The SQL console by design executes arbitrary SQL — the query itself stays
+    # here rather than in a service because there is no fixed query to abstract.
     _verify_csrf(request, csrf_token)
     fresh_token = _get_or_create_csrf_token(request)
 
@@ -221,6 +198,8 @@ def admin_run_sql(
         )
 
     try:
+        from db import get_conn
+
         with get_conn() as conn:
             cur = conn.cursor()
             cur.execute(statement)
@@ -229,7 +208,6 @@ def admin_run_sql(
             )
             if keyword in {"select", "with"}:
                 rows = cur.fetchmany(200)
-                # psycopg3: column names are on .name, not [0]
                 columns = [d.name for d in (cur.description or [])]
                 return _render_admin(
                     request,
@@ -284,14 +262,16 @@ def admin_vacuum(
     fresh_token = _get_or_create_csrf_token(request)
     try:
         # VACUUM cannot run inside a transaction block in Postgres.
-        # Use autocommit via a raw connection from the pool.
-        with get_conn() as conn:
-            conn.autocommit = True
+        # Open a dedicated connection with autocommit=True rather than borrowing
+        # from the pool — returning a connection with autocommit enabled would
+        # leave it in that mode for the next caller.
+        database_url = os.environ["DATABASE_URL"]
+        with _psycopg.connect(database_url, autocommit=True) as conn:
             conn.execute("VACUUM")
         return _render_admin(
             request, csrf_token=fresh_token, message="VACUUM completed."
         )
-    except psycopg.Error as exc:
+    except _psycopg.Error as exc:
         return _render_admin(
             request, csrf_token=fresh_token, sql_error=f"VACUUM failed: {exc}"
         )
