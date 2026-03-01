@@ -19,6 +19,10 @@ from services.charts import (
 from skills import ACTIVITY_TYPE_META, RS3_ORDER, SKILL_COLORS
 from utils import calculate_progress, xp_to_next_level
 
+# Maximum number of activities shown on the dashboard feed.
+# Keeps the payload and Python-side sort bounded as history grows.
+ACTIVITY_FEED_LIMIT = 500
+
 # ---------------------------------------------------------------------------
 # Activity helpers
 # ---------------------------------------------------------------------------
@@ -98,13 +102,13 @@ def get_dashboard_data() -> dict | None:
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        cutoff_today = today_start.strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_today = today_start
         prev_today = get_window_baseline(cur, cutoff_today, latest)
 
-        cutoff_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_24h = now - timedelta(hours=24)
         prev_24h = get_window_baseline(cur, cutoff_24h, latest)
 
-        cutoff_7d = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_7d = now - timedelta(days=7)
         prev_7d = get_window_baseline(cur, cutoff_7d, latest)
 
         # ------------------------------------------------------------------
@@ -171,7 +175,18 @@ def get_dashboard_data() -> dict | None:
         # ------------------------------------------------------------------
         # Activities
         # ------------------------------------------------------------------
-        cur.execute("SELECT id, text, date, details FROM activities")
+        # ORDER BY id DESC pre-sorts by insertion order (a reliable recency
+        # proxy) so the Python sort below operates on an already-close
+        # ordering.  LIMIT caps memory and payload size as history grows.
+        cur.execute(
+            """
+            SELECT id, text, date, details
+            FROM activities
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (ACTIVITY_FEED_LIMIT,),
+        )
         activities: list[dict] = []
         for row in cur.fetchall():
             parsed = parse_activity_ts(row["date"])
@@ -203,8 +218,6 @@ def get_dashboard_data() -> dict | None:
 
         # ------------------------------------------------------------------
         # 30-day XP history (sidebar chart)
-        # psycopg returns datetime objects for TIMESTAMP columns, so we
-        # normalise to ISO strings here rather than concatenating "+ Z".
         # ------------------------------------------------------------------
         cur.execute(
             """
@@ -221,7 +234,6 @@ def get_dashboard_data() -> dict | None:
         # ------------------------------------------------------------------
         latest_dict = dict(latest)
         latest_dict["total_xp_display"] = format_total_xp(latest["total_xp"])
-        # Normalise timestamp to string so the template can render it safely.
         latest_dict["timestamp"] = _ts_to_str(latest_dict.get("timestamp"))
 
         xp_today = max(0, latest["total_xp"] - prev_today["total_xp"])
@@ -262,7 +274,6 @@ def get_dashboard_data() -> dict | None:
             "closest_levels": closest_levels,
             "skills": skills_data,
             "activities": activities_out,
-            # Timestamps normalised to ISO strings with Z suffix for Chart.js
             "timestamps": [
                 (_ts_to_str(r["timestamp"]) or "").rstrip("Z") + "Z" for r in history
             ],

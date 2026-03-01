@@ -7,15 +7,23 @@ This file's only jobs:
   3. Include routers from routes/.
 
 All logic lives in services/, routes/, and supporting modules.
+
+Collector scheduling
+--------------------
+The hourly snapshot collection is intentionally NOT run here.  Running it
+inside the web process causes duplicate collections when Cloud Run scales to
+multiple instances, and ties ingestion availability to web server health.
+
+Use Cloud Scheduler to POST /api/update on a cron schedule instead.
+See cloudscheduler.yaml for the setup.  The admin page retains a manual
+"Collect Snapshot Now" trigger as a fallback.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from collector import collect_snapshot
 from db import init_db
 from log import configure_logging, get_logger
 from routes.admin import router as admin_router
@@ -24,20 +32,10 @@ from routes.public import router as public_router
 logger = get_logger(__name__)
 
 
-async def _background_loop() -> None:
-    while True:
-        try:
-            await collect_snapshot()  # Changed to await directly
-        except Exception:
-            logger.exception("Collector error in background loop")
-        await asyncio.sleep(3600)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     init_db()
-    asyncio.create_task(_background_loop())
     yield
 
 

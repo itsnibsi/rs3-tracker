@@ -1,0 +1,71 @@
+# Cloud Scheduler setup for rs3-tracker
+#
+# The hourly snapshot collection is triggered by Cloud Scheduler rather than
+# running inside the web process.  This avoids duplicate collections when
+# Cloud Run scales to multiple instances, and decouples ingestion health from
+# web server health.
+#
+# The target endpoint is POST /api/update — intentionally unauthenticated
+# (see REVIEW.md §B.security.1).  Cloud Scheduler hits it on a cron schedule.
+#
+# ------------------------------------------------------------------------------
+# One-time setup (run once per project, not on every deploy)
+# ------------------------------------------------------------------------------
+#
+# 1. Enable the Cloud Scheduler API if not already enabled:
+#
+#    gcloud services enable cloudscheduler.googleapis.com
+#
+# 2. Create the job (replace SERVICE_URL with your Cloud Run service URL):
+#
+#    SERVICE_URL="https://rs3-tracker-<hash>-<region>.a.run.app"
+#
+#    gcloud scheduler jobs create http rs3-tracker-collect \
+#      --location=europe-north1 \
+#      --schedule="0 * * * *" \
+#      --uri="${SERVICE_URL}/api/update" \
+#      --http-method=POST \
+#      --time-zone="UTC" \
+#      --description="Hourly RS3 snapshot collection"
+#
+# 3. Verify the job was created:
+#
+#    gcloud scheduler jobs list --location=europe-north1
+#
+# 4. Trigger a manual run to confirm it works:
+#
+#    gcloud scheduler jobs run rs3-tracker-collect --location=europe-north1
+#
+# ------------------------------------------------------------------------------
+# Updating the schedule
+# ------------------------------------------------------------------------------
+#
+# To change the cron expression (e.g. every 30 minutes):
+#
+#    gcloud scheduler jobs update http rs3-tracker-collect \
+#      --location=europe-north1 \
+#      --schedule="*/30 * * * *"
+#
+# ------------------------------------------------------------------------------
+# Pausing / resuming
+# ------------------------------------------------------------------------------
+#
+#    gcloud scheduler jobs pause  rs3-tracker-collect --location=europe-north1
+#    gcloud scheduler jobs resume rs3-tracker-collect --location=europe-north1
+#
+# ------------------------------------------------------------------------------
+# Deleting (if you want to remove the job entirely)
+# ------------------------------------------------------------------------------
+#
+#    gcloud scheduler jobs delete rs3-tracker-collect --location=europe-north1
+#
+# ------------------------------------------------------------------------------
+# Notes
+# ------------------------------------------------------------------------------
+#
+# - The admin page retains a "Collect Snapshot Now" button as a manual fallback.
+# - Cloud Scheduler retries failed HTTP calls up to 3 times by default.
+# - If the Cloud Run service is scaled to zero, the POST request will cold-start
+#   it, which is fine — collection runs after the instance is warm.
+# - If you later want to restrict /api/update to scheduler-only traffic, add an
+#   OIDC token to the scheduler job and validate it in the route handler.

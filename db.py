@@ -25,7 +25,6 @@ MigrationFn = Callable[[psycopg.Connection], None]
 
 
 def get_conn():
-    # identical external API: returns context-manageable connection
     return pool.connection()
 
 
@@ -70,8 +69,7 @@ def _mark_migration_applied(conn: psycopg.Connection, version: str):
 
 # ----------------------
 # Migrations
-# ---------------------
-
+# ----------------------
 
 MIGRATIONS: list[tuple[str, MigrationFn]] = []
 
@@ -149,14 +147,27 @@ def _create_base_tables(conn: psycopg.Connection):
 
 
 def _create_indexes(conn: psycopg.Connection):
+    # snapshots — primary access patterns: by timestamp (charts/windows) and
+    # by player_id (dashboard latest-snapshot lookup)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_player_id ON snapshots(player_id)"
+    )
+
+    # skills — looked up by snapshot_id on every dashboard load and chart query
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_skills_snapshot_skill ON skills(snapshot_id, skill)"
     )
+
+    # activities — hash for dedup on insert; snapshot_id for any future
+    # per-snapshot lookups; id DESC is the natural fetch order for the feed
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_hash ON activities(hash)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_activities_snapshot_id ON activities(snapshot_id)"
     )
 
 
