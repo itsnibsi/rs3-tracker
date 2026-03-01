@@ -13,18 +13,18 @@ Security model
 """
 
 import secrets
-import sqlite3
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import psycopg
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from collector import collect_snapshot
-from config import ADMIN_PASSWORD, ADMIN_USERNAME, DB_PATH
+from config import ADMIN_PASSWORD, ADMIN_USERNAME
 from db import get_conn
 from log import get_logger
 from web import templates
@@ -75,14 +75,13 @@ def _enforce_rate_limit(request: Request) -> None:
 _CSRF_COOKIE = "csrf_token"
 _CSRF_FIELD = "csrf_token"
 _CSRF_COOKIE_OPTS: dict = {
-    "httponly": True,  # JS cannot read it; server injects value into forms
+    "httponly": True,
     "samesite": "strict",
-    "secure": False,  # set True if the app is served exclusively over HTTPS
+    "secure": False,
 }
 
 
 def _get_or_create_csrf_token(request: Request) -> str:
-    """Return the CSRF token from the cookie, generating a fresh one if absent."""
     return request.cookies.get(_CSRF_COOKIE) or secrets.token_hex(32)
 
 
@@ -138,12 +137,17 @@ def _get_admin_overview() -> dict:
         cur.execute("SELECT timestamp FROM snapshots ORDER BY timestamp DESC LIMIT 1")
         latest_row = cur.fetchone()
 
-    db_size_bytes = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    # DB_PATH is kept in config for API compatibility but doesn't refer to a
+    # real file now — show the Postgres connection instead.
+    latest_ts = None
+    if latest_row:
+        ts = latest_row["timestamp"]
+        latest_ts = ts.isoformat() if hasattr(ts, "isoformat") else ts
+
     return {
-        "db_path": str(DB_PATH),
-        "db_size_bytes": db_size_bytes,
-        "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
-        "latest_snapshot_ts": latest_row["timestamp"] if latest_row else None,
+        "db_path": "PostgreSQL (Neon)",
+        "db_size_mb": "N/A",
+        "latest_snapshot_ts": latest_ts,
         "table_counts": table_counts,
     }
 
@@ -173,7 +177,6 @@ def _render_admin(
             "message": message,
         },
     )
-    # Refresh the CSRF cookie on every admin response so it doesn't expire mid-session.
     response.set_cookie(_CSRF_COOKIE, csrf_token, **_CSRF_COOKIE_OPTS)
     return response
 
@@ -208,7 +211,6 @@ def admin_run_sql(
             request, csrf_token=fresh_token, sql=sql, sql_error="SQL query is required."
         )
 
-    # Reject multi-statement input.
     without_trailing = statement[:-1].strip() if statement.endswith(";") else statement
     if ";" in without_trailing:
         return _render_admin(
@@ -225,9 +227,10 @@ def admin_run_sql(
             keyword = (
                 statement.split(maxsplit=1)[0].lower() if statement.split() else ""
             )
-            if keyword in {"select", "pragma", "with"}:
+            if keyword in {"select", "with"}:
                 rows = cur.fetchmany(200)
-                columns = [d[0] for d in (cur.description or [])]
+                # psycopg3: column names are on .name, not [0]
+                columns = [d.name for d in (cur.description or [])]
                 return _render_admin(
                     request,
                     csrf_token=fresh_token,
@@ -244,14 +247,14 @@ def admin_run_sql(
                 sql_rowcount=cur.rowcount,
                 message=f"Statement succeeded. Rows affected: {cur.rowcount}.",
             )
-    except sqlite3.Error as exc:
+    except psycopg.Error as exc:
         return _render_admin(
             request, csrf_token=fresh_token, sql=sql, sql_error=str(exc)
         )
 
 
 @router.post("/admin/maintenance/update", response_class=HTMLResponse)
-async def admin_collect_now(  # Added async
+async def admin_collect_now(
     request: Request,
     _: Annotated[HTTPBasicCredentials, Depends(require_admin)],
     csrf_token: str = Form(..., alias=_CSRF_FIELD),
@@ -259,7 +262,7 @@ async def admin_collect_now(  # Added async
     _verify_csrf(request, csrf_token)
     fresh_token = _get_or_create_csrf_token(request)
     try:
-        await collect_snapshot()  # Added await
+        await collect_snapshot()
         return _render_admin(
             request, csrf_token=fresh_token, message="Snapshot collected successfully."
         )
@@ -280,12 +283,15 @@ def admin_vacuum(
     _verify_csrf(request, csrf_token)
     fresh_token = _get_or_create_csrf_token(request)
     try:
+        # VACUUM cannot run inside a transaction block in Postgres.
+        # Use autocommit via a raw connection from the pool.
         with get_conn() as conn:
+            conn.autocommit = True
             conn.execute("VACUUM")
         return _render_admin(
             request, csrf_token=fresh_token, message="VACUUM completed."
         )
-    except sqlite3.Error as exc:
+    except psycopg.Error as exc:
         return _render_admin(
             request, csrf_token=fresh_token, sql_error=f"VACUUM failed: {exc}"
         )
@@ -299,13 +305,9 @@ def admin_checkpoint(
 ):
     _verify_csrf(request, csrf_token)
     fresh_token = _get_or_create_csrf_token(request)
-    try:
-        with get_conn() as conn:
-            conn.execute("PRAGMA wal_checkpoint(FULL)")
-        return _render_admin(
-            request, csrf_token=fresh_token, message="WAL checkpoint completed."
-        )
-    except sqlite3.Error as exc:
-        return _render_admin(
-            request, csrf_token=fresh_token, sql_error=f"WAL checkpoint failed: {exc}"
-        )
+    # WAL management is handled automatically by Neon — nothing to do here.
+    return _render_admin(
+        request,
+        csrf_token=fresh_token,
+        message="WAL checkpointing is managed automatically by Neon.",
+    )

@@ -36,7 +36,14 @@ def format_total_xp(value: int | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_snapshot_ts(ts: str) -> datetime:
+def parse_snapshot_ts(ts) -> datetime:
+    """Parse a snapshot timestamp to an aware datetime.
+
+    psycopg3 returns TIMESTAMP columns as datetime objects; older code paths
+    may still pass plain strings.  Both are handled here.
+    """
+    if isinstance(ts, datetime):
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
     return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
 
 
@@ -133,7 +140,7 @@ def format_bucket_label(dt: datetime, bucket: str) -> str:
 
 
 def get_period_window(
-    period: str, now: datetime, earliest_ts: str | None = None
+    period: str, now: datetime, earliest_ts=None
 ) -> tuple[datetime, datetime, str]:
     p = normalize_period(period)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -169,7 +176,7 @@ def get_period_window(
 
 
 def get_timeframe_window(
-    timeframe: str, now: datetime, earliest_ts: str | None = None
+    timeframe: str, now: datetime, earliest_ts=None
 ) -> tuple[datetime, datetime, str]:
     t = timeframe if timeframe in {"hour", "day", "week", "month", "all"} else "day"
 
@@ -358,14 +365,14 @@ def build_bucket_gains(rows, bucket: str, value_key: str) -> list[dict]:
 
 def get_window_baseline(cur, cutoff: str, latest):
     cur.execute(
-        "SELECT * FROM snapshots WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1",
+        "SELECT * FROM snapshots WHERE timestamp <= %s ORDER BY timestamp DESC LIMIT 1",
         (cutoff,),
     )
     baseline = cur.fetchone()
     if baseline:
         return baseline
     cur.execute(
-        "SELECT * FROM snapshots WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT 1",
+        "SELECT * FROM snapshots WHERE timestamp >= %s ORDER BY timestamp ASC LIMIT 1",
         (cutoff,),
     )
     return cur.fetchone() or latest

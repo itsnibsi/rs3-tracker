@@ -69,6 +69,15 @@ def classify_activity_meta(text: str | None, details: str | None = None) -> dict
 # ---------------------------------------------------------------------------
 
 
+def _ts_to_str(ts) -> str | None:
+    """Normalise a timestamp column value to an ISO string for the template."""
+    if ts is None:
+        return None
+    if hasattr(ts, "isoformat"):
+        return ts.isoformat()
+    return str(ts)
+
+
 def get_dashboard_data() -> dict | None:
     with get_conn() as conn:
         cur = conn.cursor()
@@ -102,7 +111,7 @@ def get_dashboard_data() -> dict | None:
         # Skills
         # ------------------------------------------------------------------
         cur.execute(
-            "SELECT skill, level, xp, rank FROM skills WHERE snapshot_id = ?",
+            "SELECT skill, level, xp, rank FROM skills WHERE snapshot_id = %s",
             (latest["id"],),
         )
         current_skills = cur.fetchall()
@@ -111,7 +120,7 @@ def get_dashboard_data() -> dict | None:
         prev_levels_map: dict[str, int] = {}
         if prev_today:
             cur.execute(
-                "SELECT skill, xp, level FROM skills WHERE snapshot_id = ?",
+                "SELECT skill, xp, level FROM skills WHERE snapshot_id = %s",
                 (prev_today["id"],),
             )
             for r in cur.fetchall():
@@ -188,19 +197,20 @@ def get_dashboard_data() -> dict | None:
             if a["type_key"] == "quest" and a["sort_ts"] >= today_start
         )
 
-        # Strip internal sort_ts before handing to template
         activities_out = [
             {k: v for k, v in a.items() if k != "sort_ts"} for a in activities
         ]
 
         # ------------------------------------------------------------------
         # 30-day XP history (sidebar chart)
+        # psycopg returns datetime objects for TIMESTAMP columns, so we
+        # normalise to ISO strings here rather than concatenating "+ Z".
         # ------------------------------------------------------------------
         cur.execute(
             """
             SELECT timestamp, total_xp
             FROM snapshots
-            WHERE timestamp >= datetime('now', '-30 days')
+            WHERE timestamp >= NOW() - INTERVAL '30 days'
             ORDER BY timestamp ASC
             """
         )
@@ -211,6 +221,8 @@ def get_dashboard_data() -> dict | None:
         # ------------------------------------------------------------------
         latest_dict = dict(latest)
         latest_dict["total_xp_display"] = format_total_xp(latest["total_xp"])
+        # Normalise timestamp to string so the template can render it safely.
+        latest_dict["timestamp"] = _ts_to_str(latest_dict.get("timestamp"))
 
         xp_today = max(0, latest["total_xp"] - prev_today["total_xp"])
         rank_delta = prev_today["overall_rank"] - latest["overall_rank"]
@@ -250,6 +262,9 @@ def get_dashboard_data() -> dict | None:
             "closest_levels": closest_levels,
             "skills": skills_data,
             "activities": activities_out,
-            "timestamps": [r["timestamp"] + "Z" for r in history],
+            # Timestamps normalised to ISO strings with Z suffix for Chart.js
+            "timestamps": [
+                (_ts_to_str(r["timestamp"]) or "").rstrip("Z") + "Z" for r in history
+            ],
             "xp_history": [scale_total_xp(r["total_xp"]) for r in history],
         }
