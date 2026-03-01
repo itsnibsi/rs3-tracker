@@ -40,6 +40,14 @@ steps:
           echo "Deploying without Secret Manager substitutions."
         fi
 
+        if [[ -n "${_DBURL}" ]]; then
+          deploy_args+=(
+            --set-secrets
+            "DATABASE_URL=${_DBURL}:latest"
+          )
+          echo "Deploying with Secret Manager database URL."
+        fi
+
         gcloud "$${deploy_args[@]}"
 
 substitutions:
@@ -49,6 +57,7 @@ substitutions:
   _SERVICE: rs3-tracker
   _ADMIN_USERNAME_SECRET: 'rs3-admin-username'
   _ADMIN_PASSWORD_SECRET: 'rs3-admin-password'
+  _DBURL: 'rs3-tracker-dburl'
 
 options:
   logging: CLOUD_LOGGING_ONLY
